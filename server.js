@@ -6,7 +6,7 @@ import { Server } from "socket.io";
 import { SPEECH_SECONDS, createStore, GameError, publicRoomState } from "./game.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const publicDir = path.join(__dirname, "..", "public");
+const publicDir = __dirname;
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
