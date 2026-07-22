@@ -14,7 +14,10 @@
           <p class="eyebrow">H5 多人房间</p>
           <h1>谁是卧底</h1>
         </div>
-        <button class="icon-button" id="shareButton" type="button" aria-label="分享房间" title="分享房间">↗</button>
+        <div class="top-actions">
+          <button class="icon-button" id="soundButton" type="button" aria-label="开启声音" title="开启声音">♪</button>
+          <button class="icon-button" id="shareButton" type="button" aria-label="分享房间" title="分享房间">↗</button>
+        </div>
       </section>
 
       <section class="panel hero" id="homeView">
@@ -31,12 +34,10 @@
           <input id="roomCodeInput" maxlength="6" placeholder="输入房间码" />
           <button id="joinRoomButton" type="button">加入</button>
         </div>
-        <div class="rules-card" aria-label="游戏说明">
-          <strong>游戏说明</strong>
-          <p>1. 至少 3 人开局，其他玩家准备好后由房主开始游戏。</p>
-          <p>2. 每个人只看到自己的词，不显示身份，自己判断阵营。</p>
-          <p>3. 三轮发言后投票，全员提交后自动公布答案。</p>
-          <p>4. 3-5 人投错卧底直接胜；6 人及以上第一次投错会淘汰一人，再投错则卧底胜。</p>
+        <button class="rules-toggle" id="rulesButton" type="button">不知道怎么玩？点这里</button>
+        <div class="home-chat-card">
+          <strong>开局前聊天</strong>
+          <p>创建或加入房间后，这里会变成房间聊天。可以先喊人、催准备、商量要不要开声音。</p>
         </div>
       </section>
 
@@ -57,35 +58,77 @@
       <section class="panel status hidden" id="statusCard">
         <div>
           <p class="eyebrow" id="phaseText">大厅</p>
-          <div class="status-head">
+        <div class="status-head">
             <h2 id="statusTitle">等待玩家加入</h2>
-            <div class="timer hidden" id="timer">30</div>
+            <div class="timer hidden" id="timer">60</div>
           </div>
         </div>
         <p id="statusDetail">分享链接邀请朋友。</p>
       </section>
 
+      <section class="panel chat-panel hidden" id="chatPanel">
+        <div class="section-title">
+          <h2 id="chatTitle">房间聊天</h2>
+          <span id="chatCount">0 条</span>
+        </div>
+        <div class="chat-list" id="chatList"></div>
+        <div class="chat-row">
+          <input id="chatInput" maxlength="120" placeholder="开局前先聊两句" />
+          <button id="sendChatButton" type="button">发送</button>
+        </div>
+      </section>
+
+      <section class="panel public-chat hidden" id="messagesPanel">
+        <div class="section-title">
+          <h2>发言区</h2>
+          <span id="messageCount">0 条</span>
+        </div>
+        <div class="message-list" id="messageList"></div>
+      </section>
+
       <section class="panel speak hidden" id="speakPanel">
         <div class="section-title">
           <h2>你的发言</h2>
-          <span>30 秒内发送</span>
+          <span>60 秒内发送</span>
         </div>
         <textarea id="speechInput" maxlength="180" placeholder="输入你的描述，不要直接说出词"></textarea>
         <div class="speak-actions">
           <button id="sendSpeechButton" type="button">发送并结束</button>
           <button id="recordButton" class="secondary" type="button">按下录音</button>
+          <button id="skipSpeechButton" class="secondary wide" type="button">跳过发言</button>
         </div>
-        <p class="record-hint" id="recordHint">语音会作为音频发到公屏。</p>
+        <p class="record-hint" id="recordHint">语音会作为音频发到发言区。</p>
       </section>
 
       <section class="panel controls hidden" id="hostControls"></section>
 
-      <section class="panel public-chat hidden" id="messagesPanel">
+      <section class="players panel hidden" id="playersPanel">
         <div class="section-title">
-          <h2>公屏</h2>
-          <span id="messageCount">0 条</span>
+          <h2>发弹幕</h2>
+          <div class="player-tools">
+            <button class="plain-button hidden" id="openBarrageButton" type="button">发弹幕</button>
+            <span id="playerCount">0 人</span>
+          </div>
         </div>
-        <div class="message-list" id="messageList"></div>
+        <div class="player-list" id="playerList"></div>
+      </section>
+
+      <section class="barrage-panel hidden" id="barragePanel" aria-label="弹幕菜单">
+        <div class="section-title">
+          <h2 id="barrageTitle">发弹幕</h2>
+          <button class="plain-button" id="closeBarrageButton" type="button">关闭</button>
+        </div>
+        <div class="quick-barrages">
+          <button type="button" data-barrage="你不会是卧底吧？">你不会是卧底吧？</button>
+          <button type="button" data-barrage="这话有点可疑">这话有点可疑</button>
+          <button type="button" data-barrage="我先记一票">我先记一票</button>
+          <button type="button" data-barrage="这沉默很有故事">这沉默很有故事</button>
+          <button type="button" data-barrage="表情包炸弹" data-effect="bomb">炸弹</button>
+        </div>
+        <div class="chat-row">
+          <input id="barrageInput" maxlength="40" placeholder="发一条弹幕" />
+          <button id="sendBarrageButton" type="button">发射</button>
+        </div>
       </section>
 
       <section class="panel voting hidden" id="votePanel">
@@ -97,15 +140,46 @@
         <button class="primary confirm-vote" id="confirmVoteButton" type="button">确定提交</button>
       </section>
 
-      <section class="players panel hidden" id="playersPanel">
-        <div class="section-title">
-          <h2>玩家</h2>
-          <span id="playerCount">0 人</span>
-        </div>
-        <div class="player-list" id="playerList"></div>
-      </section>
     </main>
 
+    <div class="barrage-stage" id="barrageStage"></div>
+    <div class="modal hidden" id="rulesModal" role="dialog" aria-modal="true" aria-labelledby="rulesTitle">
+      <div class="modal-card">
+        <div class="section-title">
+          <h2 id="rulesTitle">游戏玩法</h2>
+          <button class="plain-button" id="closeRulesButton" type="button">关闭</button>
+        </div>
+        <div class="rules-card">
+          <p>1. 至少 3 人开局，房主不需要准备，其他玩家准备好后由房主开始。</p>
+          <p>2. 每个人只看到自己的词，不显示身份，需要自己判断阵营。</p>
+          <p>3. 3-4 人 1 个卧底，5-6 人 2 个卧底，7 人及以上 3 个卧底。</p>
+          <p>4. 每局发言 2 轮后投票，每人 60 秒，可提前发送或跳过；平票会加一轮发言再投。</p>
+          <p>5. 3-4 人局投错则卧底胜；5 人及以上第一次投错会淘汰被投玩家，加一轮发言再次投票，二次投错则卧底胜。</p>
+          <p>6. 游戏中点“发弹幕”或玩家头像可以发弹幕、快捷语和炸弹表情；淘汰后也能观战发弹幕。</p>
+          <p>7. 同一个房间每 5 局为一大轮，第 5 局结束公布总分排名；开启新大轮后分数重新累计。</p>
+        </div>
+      </div>
+    </div>
+    <div class="modal hidden" id="reviewModal" role="dialog" aria-modal="true" aria-labelledby="reviewTitle">
+      <div class="modal-card review-card">
+        <div class="section-title">
+          <h2 id="reviewTitle">本局复盘</h2>
+          <button class="plain-button" id="closeReviewButton" type="button">先收起</button>
+        </div>
+        <div id="reviewResult"></div>
+        <div class="review-chat">
+          <div class="section-title compact-title">
+            <h2>赛后嘴硬区</h2>
+            <span id="reviewChatCount">0 条</span>
+          </div>
+          <div class="chat-list" id="reviewChatList"></div>
+          <div class="chat-row">
+            <input id="reviewChatInput" maxlength="120" placeholder="复盘、嘴硬、道歉都可以" />
+            <button id="sendReviewChatButton" type="button">发送</button>
+          </div>
+        </div>
+      </div>
+    </div>
     <div class="toast hidden" id="toast"></div>
     <script src="/socket.io/socket.io.js"></script>
     <script src="/app.js" type="module"></script>

@@ -7,6 +7,17 @@ const state = {
   clockOffset: 0,
   pendingVoteTargetId: "",
   timerId: null,
+  audioCtx: null,
+  musicAudio: null,
+  musicTimer: null,
+  soundEnabled: localStorage.getItem("undercover.soundEnabled") !== "false",
+  audioUnlocked: false,
+  timeoutSignalKey: "",
+  reviewSeenFor: "",
+  barrageTargetId: "",
+  lastTickSecond: null,
+  seenBarrageIds: new Set(),
+  optimisticBarrages: [],
   recorder: null,
   chunks: [],
   recordingStartedAt: 0
@@ -19,10 +30,14 @@ const refs = {
   roomCodeInput: $("roomCodeInput"),
   create: $("createRoomButton"),
   join: $("joinRoomButton"),
+  rulesButton: $("rulesButton"),
+  rulesModal: $("rulesModal"),
+  closeRules: $("closeRulesButton"),
   roomHeader: $("roomHeader"),
   roomCodeText: $("roomCodeText"),
   copyLink: $("copyLinkButton"),
   share: $("shareButton"),
+  sound: $("soundButton"),
   secret: $("secretCard"),
   roleText: $("roleText"),
   wordText: $("wordText"),
@@ -35,18 +50,39 @@ const refs = {
   speakPanel: $("speakPanel"),
   speechInput: $("speechInput"),
   sendSpeech: $("sendSpeechButton"),
+  skipSpeech: $("skipSpeechButton"),
   record: $("recordButton"),
   recordHint: $("recordHint"),
   controls: $("hostControls"),
   messagesPanel: $("messagesPanel"),
   messageList: $("messageList"),
   messageCount: $("messageCount"),
+  chatPanel: $("chatPanel"),
+  chatTitle: $("chatTitle"),
+  chatList: $("chatList"),
+  chatCount: $("chatCount"),
+  chatInput: $("chatInput"),
+  sendChat: $("sendChatButton"),
+  barragePanel: $("barragePanel"),
+  barrageTitle: $("barrageTitle"),
+  closeBarrage: $("closeBarrageButton"),
+  barrageStage: $("barrageStage"),
+  barrageInput: $("barrageInput"),
+  sendBarrage: $("sendBarrageButton"),
+  openBarrage: $("openBarrageButton"),
   votePanel: $("votePanel"),
   voteGrid: $("voteGrid"),
   confirmVote: $("confirmVoteButton"),
   playersPanel: $("playersPanel"),
   playerList: $("playerList"),
   playerCount: $("playerCount"),
+  reviewModal: $("reviewModal"),
+  closeReview: $("closeReviewButton"),
+  reviewResult: $("reviewResult"),
+  reviewChatList: $("reviewChatList"),
+  reviewChatCount: $("reviewChatCount"),
+  reviewChatInput: $("reviewChatInput"),
+  sendReviewChat: $("sendReviewChatButton"),
   toast: $("toast")
 };
 
@@ -55,11 +91,36 @@ if (state.roomCode) refs.roomCodeInput.value = state.roomCode;
 
 refs.create.addEventListener("click", createRoom);
 refs.join.addEventListener("click", joinRoom);
+refs.rulesButton.addEventListener("click", () => refs.rulesModal.classList.remove("hidden"));
+refs.closeRules.addEventListener("click", () => refs.rulesModal.classList.add("hidden"));
 refs.copyLink.addEventListener("click", copyLink);
 refs.share.addEventListener("click", shareRoom);
+refs.sound.addEventListener("click", toggleSound);
 refs.sendSpeech.addEventListener("click", sendTextSpeech);
+refs.skipSpeech.addEventListener("click", skipSpeech);
 refs.record.addEventListener("click", toggleRecording);
 refs.confirmVote.addEventListener("click", confirmVote);
+refs.sendChat.addEventListener("click", sendChat);
+refs.chatInput.addEventListener("keydown", (event) => {
+  if (event.key === "Enter") sendChat();
+});
+refs.sendBarrage.addEventListener("click", () => sendBarrage(refs.barrageInput.value));
+refs.openBarrage.addEventListener("click", () => openBarrageMenu(defaultBarrageTarget()));
+refs.barrageInput.addEventListener("keydown", (event) => {
+  if (event.key === "Enter") sendBarrage(refs.barrageInput.value);
+});
+refs.closeBarrage.addEventListener("click", closeBarrageMenu);
+refs.closeReview.addEventListener("click", () => refs.reviewModal.classList.add("hidden"));
+refs.sendReviewChat.addEventListener("click", sendReviewChat);
+refs.reviewChatInput.addEventListener("keydown", (event) => {
+  if (event.key === "Enter") sendReviewChat();
+});
+document.querySelectorAll("[data-barrage]").forEach((button) => {
+  button.addEventListener("click", () => sendBarrage(button.dataset.barrage, button.dataset.effect || "text"));
+});
+document.addEventListener("pointerdown", unlockAudio);
+document.addEventListener("touchstart", unlockAudio, { passive: true });
+document.addEventListener("click", unlockAudio);
 
 socket.on("connect", () => {
   if (!state.roomCode) return;
@@ -149,9 +210,14 @@ function render() {
   renderPlayers(room);
   renderControls(room, isHost, me);
   renderMessages(room);
+  renderChat(room);
+  renderBarrages(room);
   renderSpeechComposer(room, isMyTurn, me);
   renderVotes(room, me);
+  renderReview(room);
   startTimer(room);
+  startBackgroundMusic(room);
+  updateSoundButton();
 }
 
 function renderSecret(room) {
@@ -178,7 +244,7 @@ function renderStatus(room, me) {
 
   if (room.phase === "lobby") {
     refs.statusTitle.textContent = room.players.length < 3 ? "再邀请几位朋友" : "人数够了，房主可以开局";
-    refs.statusDetail.textContent = "其他玩家准备好后，房主开始游戏。3-5 人投错卧底直接胜；6 人及以上第一次投错会淘汰被投玩家，每人再发言一次，第二次仍没投中则卧底胜。投中卧底则平民胜。";
+    refs.statusDetail.textContent = "3-4 人 1 个卧底，5-6 人 2 个卧底，7 人以上 3 个卧底。两轮发言后投票。";
   } else if (room.phase === "speaking") {
     const speaker = room.players.find((player) => player.id === room.currentSpeakerId);
     const stageRound = room.round - (room.speechStageStartRound || 1) + 1;
@@ -186,7 +252,7 @@ function renderStatus(room, me) {
     refs.statusTitle.textContent = totalRounds === 1 && room.round > 3
       ? `加时发言：${speaker?.nickname || "下一位"} 发言`
       : `第 ${stageRound}/${totalRounds} 轮：${speaker?.nickname || "下一位"} 发言`;
-    refs.statusDetail.textContent = "每人 30 秒，提前提交会自动轮到下一位。";
+    refs.statusDetail.textContent = `第 ${room.seriesGameNumber}/${room.gamesPerSeries} 局 · 每人 60 秒，可提前发送或自己跳过。`;
   } else if (room.phase === "voting") {
     const submitted = room.players.filter((player) => !player.eliminated && player.hasVoted).length;
     const total = room.players.filter((player) => !player.eliminated).length;
@@ -197,21 +263,25 @@ function renderStatus(room, me) {
       <span class="progress-line">投票进度 ${submitted}/${total}${missing.length ? ` · 未提交：${escapeHtml(missing.join("、"))}` : " · 正在公布"}</span>
     `;
   } else if (room.phase === "ended") {
-    refs.statusTitle.textContent = room.result?.winner === "civilians" ? "平民获胜" : "卧底获胜";
-    refs.statusDetail.innerHTML = resultHtml(room);
+    refs.statusTitle.textContent = room.isSeriesFinal ? "五局结束，查看总分" : room.result?.winner === "civilians" ? "平民获胜" : "卧底获胜";
+    refs.statusDetail.textContent = room.isSeriesFinal
+      ? "本大轮已结束，赛后嘴硬区里可以看总分排名和本局答案。"
+      : "答案已公布，赛后嘴硬区里可以看卧底、词语和分数变化。";
   }
 }
 
 function renderPlayers(room) {
   refs.playerList.innerHTML = "";
   refs.playersPanel.classList.toggle("compact", room.phase !== "lobby");
-  for (const player of room.players) {
-    if (room.phase !== "lobby" && player.id !== state.playerId && player.id !== room.currentSpeakerId && !player.eliminated) {
-      continue;
-    }
+  refs.openBarrage.classList.toggle("hidden", room.phase === "lobby");
+  refs.openBarrage.disabled = room.phase === "lobby";
+  const visiblePlayers = room.phase === "lobby" ? room.players : compactBarragePlayers(room);
+  for (const player of visiblePlayers) {
     const item = document.createElement("div");
     item.className = "player";
+    const label = player.compactRole ? `<span class="badge host">${player.compactRole}</span>` : "";
     const badges = [
+      label,
       player.isHost ? `<span class="badge host">房主</span>` : "",
       player.ready && room.phase === "lobby" ? `<span class="badge ready">已准备</span>` : "",
       player.id === state.playerId ? `<span class="badge">你</span>` : "",
@@ -219,19 +289,32 @@ function renderPlayers(room) {
       player.eliminated ? `<span class="badge out">淘汰</span>` : "",
       !player.connected ? `<span class="badge offline">离线</span>` : "",
       player.hasVoted && room.phase === "voting" ? `<span class="badge">已投</span>` : "",
-      room.reveal?.undercoverId === player.id ? `<span class="badge host">卧底</span>` : ""
+      room.reveal?.undercoverIds?.includes(player.id) ? `<span class="badge host">卧底</span>` : ""
     ].join("");
     const scoreClass = player.score > 0 ? "positive" : player.score < 0 ? "negative" : "";
     item.innerHTML = `
-      <div class="avatar" style="background:${player.color}">${escapeHtml(player.nickname[0] || "玩")}</div>
+      <button class="avatar avatar-button" type="button" style="background:${player.color}" aria-label="给 ${escapeHtml(player.nickname)} 发弹幕">${escapeHtml(player.nickname[0] || "玩")}</button>
       <div>
         <div class="name">${escapeHtml(player.nickname)}</div>
         <div class="badges">${badges}</div>
       </div>
       <div class="score ${scoreClass}">${formatScore(player.score)}</div>
     `;
+    item.querySelector(".avatar-button").addEventListener("click", () => openBarrageMenu(player));
     refs.playerList.appendChild(item);
   }
+}
+
+function compactBarragePlayers(room) {
+  const me = room.players.find((player) => player.id === state.playerId);
+  const speaker = room.players.find((player) => player.id === room.currentSpeakerId)
+    || room.players.find((player) => !player.eliminated && player.id !== state.playerId)
+    || me
+    || room.players[0];
+  const left = speaker ? { ...speaker, compactRole: room.phase === "speaking" ? "正在发言" : "可互动" } : null;
+  const right = me ? { ...me, compactRole: "自己" } : null;
+  if (left && right) return [left, right];
+  return [left || right].filter(Boolean);
 }
 
 function renderControls(room, isHost, me) {
@@ -243,14 +326,16 @@ function renderControls(room, isHost, me) {
   if (room.phase === "lobby") {
     const readyToStart = room.players.length >= 3 && room.players.every((player) => player.isHost || player.ready);
     addControl(readyToStart ? "开始游戏" : "等待玩家准备", "wide", () => emit("game:start"), !readyToStart);
+    addControl("退出房间", "wide secondary", leaveRoom);
   } else if (room.phase === "speaking") {
-    addControl("跳过当前发言", "wide secondary", () => emit("speech:next"));
+    refs.controls.classList.add("hidden");
   } else if (room.phase === "voting") {
     const activePlayers = room.players.filter((player) => !player.eliminated);
     const allVoted = activePlayers.every((player) => player.hasVoted);
     addControl(allVoted ? "即将公布" : "催促未提交", "wide secondary", () => emit("vote:remind"), allVoted);
   } else if (room.phase === "ended") {
-    addControl("继续下一把", "wide", () => emit("game:restart"));
+    addControl(room.isSeriesFinal ? "开启新大轮" : "继续下一把", "wide", () => emit("game:restart"));
+    addControl("退出房间", "wide secondary", leaveRoom);
   }
 }
 
@@ -306,9 +391,61 @@ function renderMessages(room) {
   refs.messageList.scrollTop = refs.messageList.scrollHeight;
 }
 
+function renderChat(room) {
+  refs.chatPanel.classList.toggle("hidden", !room || !state.roomCode || room.phase !== "lobby");
+  refs.chatTitle.textContent = "房间聊天";
+  renderChatList(room.chatMessages || [], refs.chatList, refs.chatCount, "开局前先聊两句，催准备也可以。");
+}
+
+function renderChatList(messages, listEl, countEl, emptyText) {
+  countEl.textContent = `${messages.length} 条`;
+  listEl.innerHTML = "";
+  if (!messages.length) {
+    listEl.innerHTML = `<p class="empty">${escapeHtml(emptyText)}</p>`;
+    return;
+  }
+  for (const message of messages) {
+    const item = document.createElement("div");
+    item.className = `chat-message ${message.kind === "system" ? "system" : ""}`;
+    item.innerHTML = message.kind === "system"
+      ? `<span>${escapeHtml(message.text)}</span>`
+      : `<strong style="color:${message.color}">${escapeHtml(message.nickname)}</strong><span>${escapeHtml(message.text)}</span>`;
+    listEl.appendChild(item);
+  }
+  listEl.scrollTop = listEl.scrollHeight;
+}
+
+function renderBarrages(room) {
+  const barrages = room.barrages || [];
+  for (const barrage of barrages) {
+    if (state.seenBarrageIds.has(barrage.id)) continue;
+    if (wasOptimisticBarrage(barrage)) {
+      state.seenBarrageIds.add(barrage.id);
+      continue;
+    }
+    state.seenBarrageIds.add(barrage.id);
+    spawnBarrage(barrage);
+  }
+  if (state.seenBarrageIds.size > 120) {
+    state.seenBarrageIds = new Set([...state.seenBarrageIds].slice(-60));
+  }
+}
+
+function spawnBarrage(barrage) {
+  const item = document.createElement("div");
+  item.className = `barrage ${barrage.effect === "bomb" ? "bomb" : ""}`;
+  const target = barrage.targetName ? ` → ${barrage.targetName}` : "";
+  item.textContent = barrage.effect === "bomb" ? `炸弹 ${barrage.nickname}${target}：${barrage.text}` : `${barrage.nickname}${target}：${barrage.text}`;
+  item.style.top = `${12 + Math.random() * 68}%`;
+  refs.barrageStage.appendChild(item);
+  playEffect(barrage.effect === "bomb" ? "bomb" : "pop");
+  item.addEventListener("animationend", () => item.remove(), { once: true });
+}
+
 function renderSpeechComposer(room, isMyTurn, me) {
   refs.speakPanel.classList.toggle("hidden", !isMyTurn || Boolean(me?.eliminated));
   refs.sendSpeech.disabled = !isMyTurn;
+  refs.skipSpeech.disabled = !isMyTurn;
   refs.record.disabled = !isMyTurn;
   if (!isMyTurn) {
     refs.speechInput.value = "";
@@ -356,24 +493,29 @@ function confirmVote() {
 
 function resultHtml(room) {
   const reveal = room.reveal || {};
-  const undercover = room.players.find((player) => player.id === reveal.undercoverId);
+  const undercovers = reveal.undercovers?.length
+    ? reveal.undercovers
+    : [{ id: reveal.undercoverId, name: reveal.undercoverName, color: reveal.undercoverColor }];
   const votedOut = room.players.find((player) => player.id === reveal.votedOutId);
-  const civilians = room.players.filter((player) => player.id !== reveal.undercoverId);
+  const undercoverIds = new Set(undercovers.map((player) => player.id));
+  const civilians = room.players.filter((player) => !undercoverIds.has(player.id));
   const scoreItems = room.players.map((player) => {
     const change = reveal.scoreChanges?.[player.id] || 0;
     const className = change >= 0 ? "positive" : "negative";
     return `<span class="result-chip"><i style="background:${player.color}">${escapeHtml(player.nickname[0] || "玩")}</i>${escapeHtml(player.nickname)} <b class="${className}">${formatScore(change)}</b></span>`;
   }).join("");
 
+  const podium = leaderboardHtml(room);
   return `
     <div class="result-stage">
       <div class="winner-banner">${room.result?.winner === "civilians" ? "平民阵营胜利" : "卧底胜利"}</div>
-      <p>${escapeHtml(room.result?.reason || "")}</p>
+      <p class="result-reason">${escapeHtml(room.result?.reason || "")}</p>
+      ${podium}
       <div class="result-teams">
         <div class="team-card undercover">
           <span>卧底</span>
-          <div class="avatar" style="background:${undercover?.color || reveal.undercoverColor}">${escapeHtml((undercover?.nickname || reveal.undercoverName || "卧")[0])}</div>
-          <strong>${escapeHtml(undercover?.nickname || reveal.undercoverName || "未知")}</strong>
+          <div class="mini-avatars">${undercovers.map((player) => `<i style="background:${player.color || reveal.undercoverColor}">${escapeHtml((player.name || "卧")[0])}</i>`).join("")}</div>
+          <strong>${undercovers.map((player) => `${escapeHtml(player.name || "未知")}${player.eliminated ? "（出局）" : ""}`).join("、")}</strong>
           <em>${escapeHtml(reveal.undercoverWord || "")}</em>
         </div>
         <div class="team-card civilians">
@@ -415,6 +557,7 @@ function renderReadyControl(room, me, isHost) {
   refs.controls.classList.remove("hidden");
   refs.controls.innerHTML = "";
   addControl(me?.ready ? "取消准备" : "准备好了", "wide", () => emit("player:ready", { ready: !me?.ready }));
+  addControl("退出房间", "wide secondary", leaveRoom);
   return true;
 }
 
@@ -422,6 +565,7 @@ function startTimer(room) {
   clearInterval(state.timerId);
   refs.timer.classList.add("hidden");
   refs.timer.classList.remove("danger");
+  state.lastTickSecond = null;
 
   if (room.phase !== "speaking" || !room.currentSpeakerStartedAt || room.allSpoken) return;
 
@@ -432,6 +576,17 @@ function startTimer(room) {
     refs.timer.textContent = String(remaining);
     refs.timer.classList.remove("hidden");
     refs.timer.classList.toggle("danger", remaining <= 5);
+    if (remaining <= 5 && remaining > 0 && state.lastTickSecond !== remaining) {
+      state.lastTickSecond = remaining;
+      playEffect("tick");
+    }
+    if (remaining === 0) {
+      const key = `${room.code}:${room.currentSpeakerStartedAt}:${room.currentSpeakerId}`;
+      if (state.timeoutSignalKey !== key) {
+        state.timeoutSignalKey = key;
+        emit("speech:expire", { startedAt: room.currentSpeakerStartedAt });
+      }
+    }
   };
 
   tick();
@@ -443,6 +598,100 @@ function sendTextSpeech() {
   if (!text) return toast("先输入发言");
   emit("speech:submit", { kind: "text", text });
   refs.speechInput.value = "";
+}
+
+function skipSpeech() {
+  emit("speech:skip");
+  refs.speechInput.value = "";
+}
+
+function sendChat() {
+  const text = refs.chatInput.value.trim();
+  if (!text) return toast("先输入聊天内容");
+  emit("message:send", { text });
+  refs.chatInput.value = "";
+}
+
+function sendBarrage(text, effect = "text") {
+  const value = String(text || "").trim();
+  if (!value) return toast("先输入弹幕");
+  const room = state.room;
+  const me = room?.players.find((player) => player.id === state.playerId);
+  const target = room?.players.find((player) => player.id === state.barrageTargetId);
+  const optimistic = {
+    id: `local-${crypto.randomUUID()}`,
+    playerId: state.playerId,
+    nickname: me?.nickname || state.nickname || "我",
+    targetId: target?.id || "",
+    targetName: target?.nickname || "",
+    color: me?.color || "#67d7ff",
+    text: value,
+    effect,
+    createdAt: Date.now()
+  };
+  state.optimisticBarrages.push(optimistic);
+  state.optimisticBarrages = state.optimisticBarrages.slice(-8);
+  spawnBarrage(optimistic);
+  emit("barrage:send", { text: value, effect, targetId: state.barrageTargetId });
+  refs.barrageInput.value = "";
+  closeBarrageMenu();
+}
+
+function sendReviewChat() {
+  const text = refs.reviewChatInput.value.trim();
+  if (!text) return toast("先输入复盘内容");
+  emit("message:send", { text });
+  refs.reviewChatInput.value = "";
+}
+
+function openBarrageMenu(player) {
+  if (!state.room || state.room.phase === "lobby") return;
+  if (!player) return toast("现在还没有可互动的玩家");
+  state.barrageTargetId = player.id;
+  refs.barrageTitle.textContent = `对 ${player.nickname} 发弹幕`;
+  refs.barragePanel.classList.remove("hidden");
+  refs.barrageInput.focus();
+}
+
+function defaultBarrageTarget() {
+  const room = state.room;
+  if (!room) return null;
+  return room.players.find((player) => player.id === room.currentSpeakerId)
+    || room.players.find((player) => player.id === state.playerId)
+    || room.players[0]
+    || null;
+}
+
+function closeBarrageMenu() {
+  refs.barragePanel.classList.add("hidden");
+  state.barrageTargetId = "";
+}
+
+function renderReview(room) {
+  const shouldShow = room.phase === "ended";
+  if (!shouldShow) {
+    refs.reviewModal.classList.add("hidden");
+    state.reviewSeenFor = "";
+    return;
+  }
+
+  refs.reviewResult.innerHTML = resultHtml(room);
+  renderChatList(room.chatMessages || [], refs.reviewChatList, refs.reviewChatCount, "复盘还没开始，先来一句。");
+  const reviewKey = `${room.code}:${room.gameNumber}:${room.result?.winner || ""}:${room.result?.votedOutId || ""}`;
+  if (state.reviewSeenFor !== reviewKey) {
+    state.reviewSeenFor = reviewKey;
+    refs.reviewModal.classList.remove("hidden");
+  }
+}
+
+function leaveRoom() {
+  emit("room:leave", {}, (response) => {
+    if (!response?.ok) return toast(response?.message || "退出失败");
+    state.room = null;
+    state.roomCode = "";
+    history.replaceState(null, "", "/");
+    showHome();
+  });
 }
 
 async function toggleRecording() {
@@ -475,7 +724,7 @@ async function toggleRecording() {
     refs.record.textContent = "结束录音";
     refs.record.classList.add("recording");
     refs.recordHint.textContent = "正在录音，点击结束发送。";
-    setTimeout(() => stopRecording(true), 30_000);
+    setTimeout(() => stopRecording(true), 60_000);
   } catch {
     toast("没有麦克风权限");
   }
@@ -503,6 +752,108 @@ function blobToDataUrl(blob) {
   });
 }
 
+async function resumeAudioContext() {
+  if (!state.soundEnabled) return null;
+  if (!state.audioCtx) {
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContext) return null;
+    state.audioCtx = new AudioContext();
+  }
+  if (state.audioCtx.state === "suspended") await state.audioCtx.resume().catch(() => {});
+  state.audioUnlocked = state.audioCtx.state === "running";
+  return state.audioCtx;
+}
+
+function getAudioContext() {
+  if (!state.soundEnabled) return null;
+  if (!state.audioCtx) {
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContext) return null;
+    state.audioCtx = new AudioContext();
+  }
+  if (state.audioCtx.state === "suspended") state.audioCtx.resume().catch(() => {});
+  state.audioUnlocked = state.audioCtx.state === "running";
+  return state.audioCtx;
+}
+
+function playTone({ frequency = 440, duration = 0.08, type = "sine", gain = 0.04 } = {}) {
+  const ctx = getAudioContext();
+  if (!ctx) return;
+  const osc = ctx.createOscillator();
+  const volume = ctx.createGain();
+  osc.type = type;
+  osc.frequency.value = frequency;
+  volume.gain.setValueAtTime(gain, ctx.currentTime);
+  volume.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + duration);
+  osc.connect(volume);
+  volume.connect(ctx.destination);
+  osc.start();
+  osc.stop(ctx.currentTime + duration);
+}
+
+function playEffect(type) {
+  if (type === "tick") {
+    playTone({ frequency: 880, duration: 0.07, type: "square", gain: 0.035 });
+  } else if (type === "bomb") {
+    playTone({ frequency: 120, duration: 0.14, type: "sawtooth", gain: 0.07 });
+    setTimeout(() => playTone({ frequency: 80, duration: 0.18, type: "square", gain: 0.05 }), 70);
+  } else {
+    playTone({ frequency: 620, duration: 0.06, type: "triangle", gain: 0.025 });
+  }
+}
+
+function startBackgroundMusic(room) {
+  const audio = ensureMusicAudio();
+  if (!audio) return;
+  audio.volume = 1;
+  if (!state.soundEnabled) {
+    audio.pause();
+    return;
+  }
+  audio.play().catch(() => {});
+}
+
+function ensureMusicAudio() {
+  if (state.musicAudio) return state.musicAudio;
+  const audio = new Audio("/background-music.wav");
+  audio.loop = true;
+  audio.preload = "auto";
+  audio.volume = 1;
+  audio.setAttribute("playsinline", "");
+  state.musicAudio = audio;
+  return audio;
+}
+
+async function unlockAudio() {
+  if (!state.soundEnabled) return;
+  const ctx = await resumeAudioContext();
+  const audio = ensureMusicAudio();
+  if (audio) await audio.play().catch(() => {});
+  if (ctx && state.audioUnlocked) playTone({ frequency: 523, duration: 0.04, type: "sine", gain: 0.006 });
+  updateSoundButton();
+}
+
+function toggleSound() {
+  state.soundEnabled = !state.soundEnabled;
+  localStorage.setItem("undercover.soundEnabled", String(state.soundEnabled));
+  if (!state.soundEnabled) {
+    state.musicAudio?.pause();
+    toast("已关闭声音");
+  } else {
+    unlockAudio();
+    toast("已开启声音");
+    startBackgroundMusic(state.room);
+  }
+  updateSoundButton();
+}
+
+function updateSoundButton() {
+  refs.sound.textContent = state.soundEnabled ? "♪" : "×";
+  refs.sound.title = state.soundEnabled ? "关闭声音" : "开启声音";
+  refs.sound.setAttribute("aria-label", refs.sound.title);
+  refs.sound.classList.toggle("muted", !state.soundEnabled);
+}
+
 function emit(event, payload = {}, reply) {
   socket.emit(event, { roomCode: state.roomCode, playerId: state.playerId, ...payload }, reply);
 }
@@ -521,8 +872,13 @@ function showHome() {
   refs.speakPanel.classList.add("hidden");
   refs.controls.classList.add("hidden");
   refs.messagesPanel.classList.add("hidden");
+  refs.chatPanel.classList.add("hidden");
+  refs.barragePanel.classList.add("hidden");
+  refs.rulesModal.classList.add("hidden");
+  refs.reviewModal.classList.add("hidden");
   refs.votePanel.classList.add("hidden");
   refs.playersPanel.classList.add("hidden");
+  startBackgroundMusic(null);
 }
 
 function currentRoomFromPath() {
@@ -566,6 +922,42 @@ function formatScore(score) {
   return String(score);
 }
 
+function leaderboardHtml(room) {
+  if (!room.isSeriesFinal) return "";
+  const leaders = room.leaderboard || [];
+  const crownCount = Math.min(3, room.players.length);
+  const rows = leaders.map((player) => {
+    const crown = player.rank <= crownCount ? `<span class="crown">王冠</span>` : "";
+    const scoreClass = player.score > 0 ? "positive" : player.score < 0 ? "negative" : "";
+    return `
+      <div class="rank-row">
+        <span class="rank-no">${player.rank}</span>
+        <i style="background:${player.color}">${escapeHtml(player.nickname[0] || "玩")}</i>
+        <strong>${escapeHtml(player.nickname)}</strong>
+        ${crown}
+        <b class="${scoreClass}">${formatScore(player.score)}</b>
+      </div>
+    `;
+  }).join("");
+  return `
+    <div class="leaderboard">
+      <div class="leaderboard-title">五局总分排名</div>
+      ${rows}
+    </div>
+  `;
+}
+
+function wasOptimisticBarrage(barrage) {
+  const now = Date.now();
+  state.optimisticBarrages = state.optimisticBarrages.filter((item) => now - item.createdAt < 3500);
+  return state.optimisticBarrages.some((item) => (
+    item.playerId === barrage.playerId
+    && item.text === barrage.text
+    && item.effect === barrage.effect
+    && item.targetId === (barrage.targetId || "")
+  ));
+}
+
 function escapeHtml(value) {
   return String(value).replace(/[&<>"']/g, (char) => ({
     "&": "&amp;",
@@ -577,3 +969,4 @@ function escapeHtml(value) {
 }
 
 showHome();
+startBackgroundMusic(null);

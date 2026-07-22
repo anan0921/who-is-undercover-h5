@@ -2,9 +2,10 @@ import crypto from "node:crypto";
 import { WORD_PAIRS } from "./words.js";
 
 export const MIN_PLAYERS = 3;
-export const SPEECH_SECONDS = 30;
-export const SPEECH_ROUNDS_BEFORE_VOTE = 3;
+export const SPEECH_SECONDS = 60;
+export const SPEECH_ROUNDS_BEFORE_VOTE = 2;
 export const EXTRA_SPEECH_ROUNDS_AFTER_MISS = 1;
+export const GAMES_PER_SERIES = 5;
 export const COLORS = [
   "#f97316",
   "#06b6d4",
@@ -16,6 +17,15 @@ export const COLORS = [
   "#ef4444",
   "#3b82f6",
   "#a855f7"
+];
+
+const SKIP_TEASES = [
+  "你不会是卧底吧？",
+  "心虚了吗？",
+  "不敢发言了？",
+  "这沉默很有故事。",
+  "大家记一下这个可疑动作。",
+  "跳过也是一种发言。"
 ];
 
 export function createStore({ now = () => Date.now(), random = Math.random } = {}) {
@@ -48,16 +58,21 @@ export function createStore({ now = () => Date.now(), random = Math.random } = {
       createdAt: now(),
       wordPair: null,
       undercoverId: null,
+      undercoverIds: [],
       round: 1,
       speechStageStartRound: 1,
       speechRoundsInStage: SPEECH_ROUNDS_BEFORE_VOTE,
+      speakerOrder: [],
       speakerIndex: 0,
       votes: {},
       result: null,
       lastVoteSummary: null,
       messages: [],
+      chatMessages: [],
+      barrages: [],
       currentSpeakerStartedAt: null,
-      gameNumber: 0
+      gameNumber: 0,
+      seriesNumber: 1
     };
     rooms.set(roomCode, room);
     return { room, player };
@@ -95,21 +110,36 @@ export function createStore({ now = () => Date.now(), random = Math.random } = {
       throw new GameError("还有玩家没有准备好");
     }
 
-    const undercover = activePlayers[Math.floor(random() * activePlayers.length)];
+    if (room.phase === "lobby" && room.gameNumber > 0 && room.gameNumber % GAMES_PER_SERIES === 0) {
+      for (const player of room.players) player.score = 0;
+      room.seriesNumber += 1;
+      room.chatMessages.push(makeSystemMessage({
+        text: `第 ${room.seriesNumber} 大轮开始，分数已重新计`,
+        now
+      }));
+    }
+
+    const undercoverIds = pickUndercoverIds(activePlayers, random);
     const wordPair = WORD_PAIRS[Math.floor(random() * WORD_PAIRS.length)];
     room.wordPair = wordPair;
-    room.undercoverId = undercover.id;
-    room.voteRule = activePlayers.length > 5 ? "oneRetryOnMiss" : "undercoverWinsOnMiss";
+    room.undercoverIds = undercoverIds;
+    room.undercoverId = undercoverIds[0];
+    room.voteRule = activePlayers.length > 4 ? "oneRetryOnMiss" : "undercoverWinsOnMiss";
     room.missCount = 0;
     room.phase = "speaking";
     room.round = 1;
     room.speechStageStartRound = 1;
     room.speechRoundsInStage = SPEECH_ROUNDS_BEFORE_VOTE;
+    room.speakerOrder = shuffleIds(activePlayers, random);
     room.speakerIndex = 0;
     room.votes = {};
     room.result = null;
     room.lastVoteSummary = null;
     room.messages = [];
+    room.chatMessages.push(makeSystemMessage({
+      text: `第 ${seriesGameNumber(room.gameNumber + 1)} / ${GAMES_PER_SERIES} 局开始，发言顺序已随机打乱`,
+      now
+    }));
     room.currentSpeakerStartedAt = now();
     room.gameNumber += 1;
 
@@ -131,9 +161,33 @@ export function createStore({ now = () => Date.now(), random = Math.random } = {
 
   function nextSpeaker({ roomCode, hostId }) {
     const room = requireRoom(roomCode);
-    requireHost(room, hostId);
+    requirePlayer(room, hostId);
+    throw new GameError("只能由当前发言者发送、录音或跳过");
+  }
+
+  function skipSpeech({ roomCode, playerId }) {
+    const room = requireRoom(roomCode);
     if (room.phase !== "speaking") throw new GameError("当前不是发言阶段");
 
+    const eligible = getSpeakingPlayers(room);
+    const currentSpeaker = eligible[room.speakerIndex];
+    if (!currentSpeaker) throw new GameError("这一轮已经发言完了");
+    if (currentSpeaker.id !== playerId) throw new GameError("还没轮到你发言");
+
+    const tease = SKIP_TEASES[Math.floor(random() * SKIP_TEASES.length)];
+    room.messages.push(makeSystemMessage({
+      text: `${currentSpeaker.nickname} 跳过了发言。${tease}`,
+      now
+    }));
+    room.barrages.push({
+      id: crypto.randomUUID(),
+      playerId,
+      kind: "barrage",
+      effect: "text",
+      text: tease,
+      createdAt: now()
+    });
+    room.barrages = room.barrages.slice(-40);
     advanceSpeaker(room, now);
     return room;
   }
@@ -202,21 +256,40 @@ export function createStore({ now = () => Date.now(), random = Math.random } = {
       room.round += 1;
       room.speechStageStartRound = room.round;
       room.speechRoundsInStage = EXTRA_SPEECH_ROUNDS_AFTER_MISS;
+      room.speakerOrder = shuffleIds(getSpeakingPlayers(room), random);
       room.speakerIndex = 0;
       room.votes = {};
       room.currentSpeakerStartedAt = now();
       return room;
     }
 
-    if (summary.winnerId === room.undercoverId) {
-      room.phase = "ended";
-      room.result = {
-        winner: "civilians",
-        reason: "卧底被投出，平民获胜",
-        votedOutId: summary.winnerId,
-        scoreChanges: scoreChangesFor(room, "civilians")
-      };
-      applyScores(room);
+    if (isUndercover(room, summary.winnerId)) {
+      const votedOut = requirePlayer(room, summary.winnerId);
+      votedOut.eliminated = true;
+      const remainingUndercoverIds = getRemainingUndercoverIds(room);
+      if (remainingUndercoverIds.length === 0) {
+        room.phase = "ended";
+        room.result = {
+          winner: "civilians",
+          reason: "所有卧底被投出，平民获胜",
+          votedOutId: summary.winnerId,
+          scoreChanges: scoreChangesFor(room, "civilians")
+        };
+        applyScores(room);
+        return room;
+      }
+      room.messages.push(makeSystemMessage({
+        text: `${votedOut.nickname} 是卧底，已出局！还有 ${remainingUndercoverIds.length} 名卧底藏在人群中，继续发言一轮`,
+        now
+      }));
+      room.phase = "speaking";
+      room.round += 1;
+      room.speechStageStartRound = room.round;
+      room.speechRoundsInStage = EXTRA_SPEECH_ROUNDS_AFTER_MISS;
+      room.speakerOrder = shuffleIds(getSpeakingPlayers(room), random);
+      room.speakerIndex = 0;
+      room.votes = {};
+      room.currentSpeakerStartedAt = now();
       return room;
     }
 
@@ -239,24 +312,11 @@ export function createStore({ now = () => Date.now(), random = Math.random } = {
       text: `${votedOut.nickname} 被投出，但不是卧底，剩余玩家再发言一轮`,
       now
     }));
-    const remainingCivilians = activePlayers.filter((player) => player.id !== room.undercoverId && player.id !== votedOut.id).length;
-    const undercoverAlive = !requirePlayer(room, room.undercoverId).eliminated;
-    if (undercoverAlive && remainingCivilians <= 1) {
-      room.phase = "ended";
-      room.result = {
-        winner: "undercover",
-        reason: "平民人数过少，卧底获胜",
-        votedOutId: summary.winnerId,
-        scoreChanges: scoreChangesFor(room, "undercover")
-      };
-      applyScores(room);
-      return room;
-    }
-
     room.phase = "speaking";
     room.round += 1;
     room.speechStageStartRound = room.round;
     room.speechRoundsInStage = EXTRA_SPEECH_ROUNDS_AFTER_MISS;
+    room.speakerOrder = shuffleIds(getSpeakingPlayers(room), random);
     room.speakerIndex = 0;
     room.votes = {};
     room.currentSpeakerStartedAt = now();
@@ -290,6 +350,42 @@ export function createStore({ now = () => Date.now(), random = Math.random } = {
     return room;
   }
 
+  function sendChat({ roomCode, playerId, text }) {
+    const room = requireRoom(roomCode);
+    const player = requirePlayer(room, playerId);
+    const cleanText = String(text || "").trim().slice(0, 120);
+    if (!cleanText) throw new GameError("聊天内容不能为空");
+    room.chatMessages.push({
+      id: crypto.randomUUID(),
+      playerId: player.id,
+      kind: "chat",
+      text: cleanText,
+      createdAt: now()
+    });
+    room.chatMessages = room.chatMessages.slice(-80);
+    return room;
+  }
+
+  function sendBarrage({ roomCode, playerId, text, effect = "text", targetId = "" }) {
+    const room = requireRoom(roomCode);
+    const player = requirePlayer(room, playerId);
+    const target = targetId ? room.players.find((item) => item.id === targetId) : null;
+    const cleanText = String(text || "").trim().slice(0, 40);
+    if (!cleanText) throw new GameError("弹幕内容不能为空");
+    const cleanEffect = effect === "bomb" ? "bomb" : "text";
+    room.barrages.push({
+      id: crypto.randomUUID(),
+      playerId: player.id,
+      targetId: target?.id || "",
+      kind: "barrage",
+      effect: cleanEffect,
+      text: cleanText,
+      createdAt: now()
+    });
+    room.barrages = room.barrages.slice(-40);
+    return room;
+  }
+
   function restartGame({ roomCode, hostId }) {
     const room = requireRoom(roomCode);
     requireHost(room, hostId);
@@ -297,9 +393,11 @@ export function createStore({ now = () => Date.now(), random = Math.random } = {
     room.phase = "lobby";
     room.wordPair = null;
     room.undercoverId = null;
+    room.undercoverIds = [];
     room.round = 1;
     room.speechStageStartRound = 1;
     room.speechRoundsInStage = SPEECH_ROUNDS_BEFORE_VOTE;
+    room.speakerOrder = [];
     room.speakerIndex = 0;
     room.votes = {};
     room.result = null;
@@ -311,6 +409,18 @@ export function createStore({ now = () => Date.now(), random = Math.random } = {
       player.eliminated = false;
       player.ready = false;
     }
+    return room;
+  }
+
+  function leaveRoom({ roomCode, playerId }) {
+    const room = requireRoom(roomCode);
+    if (!["lobby", "ended"].includes(room.phase)) throw new GameError("本局进行中，结束后才能退出");
+    const player = requirePlayer(room, playerId);
+    room.players = room.players.filter((item) => item.id !== player.id);
+    room.messages.push(makeSystemMessage({ text: `${player.nickname} 离开了房间`, now }));
+    room.chatMessages.push(makeSystemMessage({ text: `${player.nickname} 离开了房间`, now }));
+    if (room.hostId === player.id) transferHost(room);
+    if (room.players.length === 0) rooms.delete(room.code);
     return room;
   }
 
@@ -337,13 +447,17 @@ export function createStore({ now = () => Date.now(), random = Math.random } = {
     setReady,
     nextSpeaker,
     submitSpeech,
+    skipSpeech,
     expireCurrentSpeaker,
     castVote,
     resolveVote,
     resolveVoteIfReady,
     remindVoters,
+    sendChat,
+    sendBarrage,
     markConnected,
     restartGame,
+    leaveRoom,
     getRoom
   };
 }
@@ -352,7 +466,7 @@ export function publicRoomState(room, viewerId) {
   const speakingPlayers = getSpeakingPlayers(room);
   const currentSpeaker = room.phase === "speaking" ? speakingPlayers[room.speakerIndex] || null : null;
   const viewer = room.players.find((player) => player.id === viewerId);
-  const isUndercover = viewer?.id === room.undercoverId;
+  const isUndercoverPlayer = isUndercover(room, viewer?.id);
   const showSecret = room.phase !== "lobby" && room.wordPair && viewer;
 
   return {
@@ -362,10 +476,17 @@ export function publicRoomState(room, viewerId) {
     phase: room.phase,
     voteRule: room.voteRule,
     missCount: room.missCount,
+    undercoverCount: getUndercoverCount(room.players.length),
+    remainingUndercoverCount: getRemainingUndercoverIds(room).length,
     round: room.round,
     speechStageStartRound: room.speechStageStartRound,
     speechRoundsInStage: room.speechRoundsInStage,
     gameNumber: room.gameNumber,
+    seriesNumber: room.seriesNumber,
+    seriesGameNumber: seriesGameNumber(room.gameNumber || 1),
+    gamesPerSeries: GAMES_PER_SERIES,
+    isSeriesFinal: room.phase === "ended" && room.gameNumber > 0 && room.gameNumber % GAMES_PER_SERIES === 0,
+    leaderboard: leaderboard(room),
     speakerIndex: room.speakerIndex,
     currentSpeakerId: currentSpeaker?.id || null,
     currentSpeakerStartedAt: room.currentSpeakerStartedAt,
@@ -388,13 +509,24 @@ export function publicRoomState(room, viewerId) {
       nickname: room.players.find((player) => player.id === message.playerId)?.nickname || "玩家",
       color: room.players.find((player) => player.id === message.playerId)?.color || COLORS[0]
     })),
+    chatMessages: room.chatMessages.map((message) => ({
+      ...message,
+      nickname: room.players.find((player) => player.id === message.playerId)?.nickname || "系统",
+      color: room.players.find((player) => player.id === message.playerId)?.color || COLORS[0]
+    })),
+    barrages: room.barrages.map((message) => ({
+      ...message,
+      nickname: room.players.find((player) => player.id === message.playerId)?.nickname || "玩家",
+      targetName: room.players.find((player) => player.id === message.targetId)?.nickname || "",
+      color: room.players.find((player) => player.id === message.playerId)?.color || COLORS[0]
+    })),
     votes: room.phase === "voting" ? [] : publicVotes(room),
     voteCounts: room.phase === "voting" ? {} : publicVoteCounts(room),
     lastVoteSummary: room.lastVoteSummary,
     result: room.result,
     secret: showSecret
       ? {
-          word: isUndercover ? room.wordPair.undercoverWord : room.wordPair.civilianWord,
+          word: isUndercoverPlayer ? room.wordPair.undercoverWord : room.wordPair.civilianWord,
           category: room.wordPair.category,
           difficulty: room.wordPair.difficulty
         }
@@ -403,6 +535,16 @@ export function publicRoomState(room, viewerId) {
       room.phase === "ended" && room.wordPair
         ? {
             undercoverId: room.undercoverId,
+            undercoverIds: room.undercoverIds,
+            undercovers: room.undercoverIds.map((id) => {
+              const player = room.players.find((item) => item.id === id);
+              return {
+                id,
+                name: player?.nickname || "未知",
+                color: player?.color || COLORS[0],
+                eliminated: Boolean(player?.eliminated)
+              };
+            }),
             undercoverName: room.players.find((player) => player.id === room.undercoverId)?.nickname || "未知",
             undercoverColor: room.players.find((player) => player.id === room.undercoverId)?.color || COLORS[0],
             votedOutId: room.result?.votedOutId || null,
@@ -443,7 +585,7 @@ function makeMessage({ playerId, kind, text, audio, now }) {
 
   if (normalizedKind === "text" && !cleanText) throw new GameError("发言不能为空");
   if (normalizedKind === "audio" && !cleanAudio.startsWith("data:audio/")) throw new GameError("语音内容无效");
-  if (cleanAudio.length > 1_500_000) throw new GameError("语音太长了，请控制在 30 秒内");
+  if (cleanAudio.length > 3_000_000) throw new GameError("语音太长了，请控制在 60 秒内");
 
   return {
     id: crypto.randomUUID(),
@@ -500,7 +642,7 @@ function advanceSpeaker(room, now) {
 function applyScores(room) {
   const undercoverWon = room.result?.winner === "undercover";
   for (const player of room.players) {
-    const won = undercoverWon ? player.id === room.undercoverId : player.id !== room.undercoverId;
+    const won = undercoverWon ? isUndercover(room, player.id) : !isUndercover(room, player.id);
     player.score += won ? 5 : -5;
   }
 }
@@ -508,9 +650,26 @@ function applyScores(room) {
 function scoreChangesFor(room, winner) {
   const undercoverWon = winner === "undercover";
   return Object.fromEntries(room.players.map((player) => {
-    const won = undercoverWon ? player.id === room.undercoverId : player.id !== room.undercoverId;
+    const won = undercoverWon ? isUndercover(room, player.id) : !isUndercover(room, player.id);
     return [player.id, won ? 5 : -5];
   }));
+}
+
+function seriesGameNumber(gameNumber) {
+  const normalized = Math.max(1, Number(gameNumber) || 1);
+  return ((normalized - 1) % GAMES_PER_SERIES) + 1;
+}
+
+function leaderboard(room) {
+  return [...room.players]
+    .sort((a, b) => b.score - a.score || a.joinedAt - b.joinedAt)
+    .map((player, index) => ({
+      id: player.id,
+      nickname: player.nickname,
+      color: player.color,
+      score: player.score,
+      rank: index + 1
+    }));
 }
 
 function cleanNickname(nickname) {
@@ -536,7 +695,43 @@ function getActivePlayers(room) {
 }
 
 function getSpeakingPlayers(room) {
-  return getActivePlayers(room).filter((player) => !player.eliminated);
+  const players = getActivePlayers(room).filter((player) => !player.eliminated);
+  if (!room.speakerOrder?.length) return players;
+  const byId = new Map(players.map((player) => [player.id, player]));
+  const ordered = room.speakerOrder.map((id) => byId.get(id)).filter(Boolean);
+  const remaining = players.filter((player) => !room.speakerOrder.includes(player.id));
+  return [...ordered, ...remaining];
+}
+
+function getUndercoverCount(playerCount) {
+  if (playerCount >= 7) return 3;
+  if (playerCount >= 5) return 2;
+  return 1;
+}
+
+function pickUndercoverIds(players, random) {
+  const count = Math.min(getUndercoverCount(players.length), Math.max(1, players.length - 1));
+  return shuffleIds(players, random).slice(0, count);
+}
+
+function shuffleIds(players, random) {
+  const ids = players.map((player) => player.id);
+  for (let index = ids.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(random() * (index + 1));
+    [ids[index], ids[swapIndex]] = [ids[swapIndex], ids[index]];
+  }
+  return ids;
+}
+
+function isUndercover(room, playerId) {
+  return Boolean(playerId && (room.undercoverIds?.length ? room.undercoverIds.includes(playerId) : room.undercoverId === playerId));
+}
+
+function getRemainingUndercoverIds(room) {
+  return (room.undercoverIds || [room.undercoverId]).filter((id) => {
+    const player = room.players.find((item) => item.id === id);
+    return player && !player.eliminated;
+  });
 }
 
 function tallyVotes(room, activePlayers) {

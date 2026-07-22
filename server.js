@@ -11,7 +11,7 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: { origin: true },
-  maxHttpBufferSize: 1_000_000
+  maxHttpBufferSize: 4_000_000
 });
 const game = createStore();
 const socketPlayers = new Map();
@@ -62,6 +62,16 @@ io.on("connection", (socket) => {
     broadcastRoom(room.code);
   }));
 
+  socket.on("speech:skip", safe(socket, ({ roomCode, playerId }) => {
+    const room = game.skipSpeech({ roomCode, playerId });
+    broadcastRoom(room.code);
+  }));
+
+  socket.on("speech:expire", safe(socket, ({ roomCode, startedAt }) => {
+    const room = game.expireCurrentSpeaker({ roomCode, startedAt });
+    if (room) broadcastRoom(room.code);
+  }));
+
   socket.on("vote:cast", safe(socket, ({ roomCode, playerId, targetId }) => {
     game.castVote({ roomCode, voterId: playerId, targetId });
     const room = game.resolveVoteIfReady({ roomCode });
@@ -73,9 +83,27 @@ io.on("connection", (socket) => {
     broadcastRoom(room.code);
   }));
 
+  socket.on("message:send", safe(socket, ({ roomCode, playerId, text }) => {
+    const room = game.sendChat({ roomCode, playerId, text });
+    broadcastRoom(room.code);
+  }));
+
+  socket.on("barrage:send", safe(socket, ({ roomCode, playerId, text, effect }) => {
+    const room = game.sendBarrage({ roomCode, playerId, text, effect });
+    broadcastRoom(room.code);
+  }));
+
   socket.on("game:restart", safe(socket, ({ roomCode, playerId }) => {
     const room = game.restartGame({ roomCode, hostId: playerId });
     broadcastRoom(room.code);
+  }));
+
+  socket.on("room:leave", safe(socket, ({ roomCode, playerId }, reply) => {
+    const room = game.leaveRoom({ roomCode, playerId });
+    socket.leave(roomCode);
+    socketPlayers.delete(socket.id);
+    reply?.({ ok: true });
+    if (room) broadcastRoom(room.code);
   }));
 
   socket.on("room:sync", safe(socket, ({ roomCode, playerId }) => {
