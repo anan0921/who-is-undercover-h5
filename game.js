@@ -124,7 +124,7 @@ export function createStore({ now = () => Date.now(), random = Math.random } = {
     room.wordPair = wordPair;
     room.undercoverIds = undercoverIds;
     room.undercoverId = undercoverIds[0];
-    room.voteRule = activePlayers.length > 4 ? "oneRetryOnMiss" : "undercoverWinsOnMiss";
+    room.voteRule = activePlayers.length > 5 ? "oneRetryOnMiss" : "undercoverWinsOnMiss";
     room.missCount = 0;
     room.phase = "speaking";
     room.round = 1;
@@ -222,16 +222,25 @@ export function createStore({ now = () => Date.now(), random = Math.random } = {
     return room;
   }
 
-  function castVote({ roomCode, voterId, targetId }) {
+  function castVote({ roomCode, voterId, targetId, targetIds }) {
     const room = requireRoom(roomCode);
     if (room.phase !== "voting") throw new GameError("当前不是投票阶段");
 
     const voter = requirePlayer(room, voterId);
-    const target = requirePlayer(room, targetId);
     if (voter.eliminated) throw new GameError("已淘汰玩家不能投票");
-    if (target.eliminated) throw new GameError("不能投给已淘汰玩家");
 
-    room.votes[voter.id] = target.id;
+    const quota = voteQuota(room);
+    const ids = Array.isArray(targetIds) ? targetIds : [targetId];
+    const cleanIds = ids.map((id) => String(id || "")).filter(Boolean);
+    const uniqueIds = [...new Set(cleanIds)];
+    if (uniqueIds.length !== cleanIds.length) throw new GameError("不能把多票投给同一个人");
+    if (uniqueIds.length !== quota) throw new GameError(`本轮需要选择 ${quota} 名玩家`);
+    for (const id of uniqueIds) {
+      const target = requirePlayer(room, id);
+      if (target.eliminated) throw new GameError("不能投给已淘汰玩家");
+    }
+
+    room.votes[voter.id] = uniqueIds;
     return room;
   }
 
@@ -241,15 +250,16 @@ export function createStore({ now = () => Date.now(), random = Math.random } = {
     if (room.phase !== "voting") throw new GameError("当前不能结算投票");
 
     const activePlayers = getActivePlayers(room).filter((player) => !player.eliminated);
-    if (activePlayers.some((player) => !room.votes[player.id])) {
+    const quota = voteQuota(room);
+    if (activePlayers.some((player) => !hasSubmittedVote(room, player.id, quota))) {
       throw new GameError("还有玩家没有提交投票");
     }
     const summary = tallyVotes(room, activePlayers);
     room.lastVoteSummary = summary;
 
-    if (!summary.winnerId || summary.tied) {
+    if (!summary.winnerIds.length || summary.tied) {
       room.messages.push(makeSystemMessage({
-        text: `本轮平票，没有人淘汰，所有人再发言一轮`,
+        text: `本轮关键名次平票，没有人淘汰，所有人再发言一轮`,
         now
       }));
       room.phase = "speaking";
@@ -263,23 +273,27 @@ export function createStore({ now = () => Date.now(), random = Math.random } = {
       return room;
     }
 
-    if (isUndercover(room, summary.winnerId)) {
-      const votedOut = requirePlayer(room, summary.winnerId);
-      votedOut.eliminated = true;
+    const votedOutPlayers = summary.winnerIds.map((id) => requirePlayer(room, id));
+    for (const player of votedOutPlayers) player.eliminated = true;
+    const caughtUndercovers = votedOutPlayers.filter((player) => isUndercover(room, player.id));
+    const missedAll = caughtUndercovers.length === 0;
+
+    if (caughtUndercovers.length > 0) {
       const remainingUndercoverIds = getRemainingUndercoverIds(room);
       if (remainingUndercoverIds.length === 0) {
         room.phase = "ended";
         room.result = {
           winner: "civilians",
           reason: "所有卧底被投出，平民获胜",
-          votedOutId: summary.winnerId,
+          votedOutId: summary.winnerIds[0],
+          votedOutIds: summary.winnerIds,
           scoreChanges: scoreChangesFor(room, "civilians")
         };
         applyScores(room);
         return room;
       }
       room.messages.push(makeSystemMessage({
-        text: `${votedOut.nickname} 是卧底，已出局！还有 ${remainingUndercoverIds.length} 名卧底藏在人群中，继续发言一轮`,
+        text: `${caughtUndercovers.map((player) => player.nickname).join("、")} 是卧底，已出局！还有 ${remainingUndercoverIds.length} 名卧底藏在人群中，继续发言一轮`,
         now
       }));
       room.phase = "speaking";
@@ -293,23 +307,22 @@ export function createStore({ now = () => Date.now(), random = Math.random } = {
       return room;
     }
 
-    if (room.voteRule === "undercoverWinsOnMiss" || room.missCount >= 1) {
+    if (missedAll && (room.voteRule === "undercoverWinsOnMiss" || room.missCount >= 1)) {
       room.phase = "ended";
       room.result = {
         winner: "undercover",
         reason: room.voteRule === "oneRetryOnMiss" ? "第二次仍未投中卧底，卧底获胜" : "没有投中卧底，卧底获胜",
-        votedOutId: summary.winnerId,
+        votedOutId: summary.winnerIds[0],
+        votedOutIds: summary.winnerIds,
         scoreChanges: scoreChangesFor(room, "undercover")
       };
       applyScores(room);
       return room;
     }
 
-    const votedOut = requirePlayer(room, summary.winnerId);
-    votedOut.eliminated = true;
     room.missCount += 1;
     room.messages.push(makeSystemMessage({
-      text: `${votedOut.nickname} 被投出，但不是卧底，剩余玩家再发言一轮`,
+      text: `${votedOutPlayers.map((player) => player.nickname).join("、")} 被投出，但都不是卧底，剩余玩家再发言一轮`,
       now
     }));
     room.phase = "speaking";
@@ -327,7 +340,8 @@ export function createStore({ now = () => Date.now(), random = Math.random } = {
     const room = requireRoom(roomCode);
     if (room.phase !== "voting") return room;
     const activePlayers = getActivePlayers(room).filter((player) => !player.eliminated);
-    if (activePlayers.some((player) => !room.votes[player.id])) return room;
+    const quota = voteQuota(room);
+    if (activePlayers.some((player) => !hasSubmittedVote(room, player.id, quota))) return room;
     return resolveVote({ roomCode, requireHostRole: false });
   }
 
@@ -372,7 +386,7 @@ export function createStore({ now = () => Date.now(), random = Math.random } = {
     const target = targetId ? room.players.find((item) => item.id === targetId) : null;
     const cleanText = String(text || "").trim().slice(0, 40);
     if (!cleanText) throw new GameError("弹幕内容不能为空");
-    const cleanEffect = effect === "bomb" ? "bomb" : "text";
+    const cleanEffect = "text";
     room.barrages.push({
       id: crypto.randomUUID(),
       playerId: player.id,
@@ -478,6 +492,7 @@ export function publicRoomState(room, viewerId) {
     missCount: room.missCount,
     undercoverCount: getUndercoverCount(room.players.length),
     remainingUndercoverCount: getRemainingUndercoverIds(room).length,
+    voteQuota: voteQuota(room),
     round: room.round,
     speechStageStartRound: room.speechStageStartRound,
     speechRoundsInStage: room.speechRoundsInStage,
@@ -502,7 +517,7 @@ export function publicRoomState(room, viewerId) {
       connected: player.connected,
       eliminated: player.eliminated,
       isHost: player.id === room.hostId,
-      hasVoted: Boolean(room.votes[player.id])
+      hasVoted: hasSubmittedVote(room, player.id, voteQuota(room))
     })),
     messages: room.messages.map((message) => ({
       ...message,
@@ -520,7 +535,7 @@ export function publicRoomState(room, viewerId) {
       targetName: room.players.find((player) => player.id === message.targetId)?.nickname || "",
       color: room.players.find((player) => player.id === message.playerId)?.color || COLORS[0]
     })),
-    votes: room.phase === "voting" ? [] : publicVotes(room),
+    votes: room.phase === "voting" ? publicOwnVotes(room, viewerId) : publicVotes(room),
     voteCounts: room.phase === "voting" ? {} : publicVoteCounts(room),
     lastVoteSummary: room.lastVoteSummary,
     result: room.result,
@@ -548,6 +563,7 @@ export function publicRoomState(room, viewerId) {
             undercoverName: room.players.find((player) => player.id === room.undercoverId)?.nickname || "未知",
             undercoverColor: room.players.find((player) => player.id === room.undercoverId)?.color || COLORS[0],
             votedOutId: room.result?.votedOutId || null,
+            votedOutIds: room.result?.votedOutIds || (room.result?.votedOutId ? [room.result.votedOutId] : []),
             votedOutName: room.players.find((player) => player.id === room.result?.votedOutId)?.nickname || "",
             scoreChanges: room.result?.scoreChanges || {},
             civilianWord: room.wordPair.civilianWord,
@@ -704,8 +720,7 @@ function getSpeakingPlayers(room) {
 }
 
 function getUndercoverCount(playerCount) {
-  if (playerCount >= 7) return 3;
-  if (playerCount >= 5) return 2;
+  if (playerCount > 5) return 2;
   return 1;
 }
 
@@ -734,36 +749,54 @@ function getRemainingUndercoverIds(room) {
   });
 }
 
+function voteQuota(room) {
+  return Math.max(1, getRemainingUndercoverIds(room).length || getUndercoverCount(getActivePlayers(room).length));
+}
+
+function hasSubmittedVote(room, voterId, quota = voteQuota(room)) {
+  return Array.isArray(room.votes[voterId]) && room.votes[voterId].length === quota;
+}
+
 function tallyVotes(room, activePlayers) {
   const counts = {};
-  for (const targetId of Object.values(room.votes)) {
-    if (activePlayers.some((player) => player.id === targetId)) {
-      counts[targetId] = (counts[targetId] || 0) + 1;
+  for (const targetIds of Object.values(room.votes)) {
+    for (const targetId of Array.isArray(targetIds) ? targetIds : [targetIds]) {
+      if (activePlayers.some((player) => player.id === targetId)) {
+        counts[targetId] = (counts[targetId] || 0) + 1;
+      }
     }
   }
 
-  let top = 0;
-  let leaders = [];
-  for (const player of activePlayers) {
-    const count = counts[player.id] || 0;
-    if (count > top) {
-      top = count;
-      leaders = [player.id];
-    } else if (count === top && count > 0) {
-      leaders.push(player.id);
-    }
-  }
+  const quota = voteQuota(room);
+  const ranked = activePlayers
+    .map((player) => ({ id: player.id, count: counts[player.id] || 0 }))
+    .sort((a, b) => b.count - a.count);
+  const cutoff = ranked[Math.min(quota, ranked.length) - 1]?.count || 0;
+  const aboveCutoff = ranked.filter((item) => item.count > cutoff);
+  const atCutoff = ranked.filter((item) => item.count === cutoff && item.count > 0);
+  const tiedAtCutoff = cutoff === 0 || (aboveCutoff.length < quota && atCutoff.length > quota - aboveCutoff.length);
+  const winnerIds = tiedAtCutoff ? [] : ranked.slice(0, quota).filter((item) => item.count > 0).map((item) => item.id);
 
   return {
     counts,
-    winnerId: leaders.length === 1 ? leaders[0] : null,
-    tied: leaders.length !== 1,
-    topVotes: top
+    winnerId: winnerIds[0] || null,
+    winnerIds,
+    tied: tiedAtCutoff,
+    topVotes: ranked[0]?.count || 0,
+    quota
   };
 }
 
 function publicVotes(room) {
-  return Object.entries(room.votes).map(([voterId, targetId]) => ({ voterId, targetId }));
+  return Object.entries(room.votes).flatMap(([voterId, targetIds]) => {
+    const ids = Array.isArray(targetIds) ? targetIds : [targetIds];
+    return ids.map((targetId) => ({ voterId, targetId }));
+  });
+}
+
+function publicOwnVotes(room, viewerId) {
+  const targetIds = room.votes[viewerId] || [];
+  return (Array.isArray(targetIds) ? targetIds : [targetIds]).map((targetId) => ({ voterId: viewerId, targetId }));
 }
 
 function publicVoteCounts(room) {

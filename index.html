@@ -66,6 +66,8 @@
         <p id="statusDetail">分享链接邀请朋友。</p>
       </section>
 
+      <button class="rules-toggle room-rules hidden" id="roomRulesButton" type="button">不知道怎么玩？点这里</button>
+
       <section class="panel chat-panel hidden" id="chatPanel">
         <div class="section-title">
           <h2 id="chatTitle">房间聊天</h2>
@@ -104,9 +106,9 @@
 
       <section class="players panel hidden" id="playersPanel">
         <div class="section-title">
-          <h2>发弹幕</h2>
+          <h2 id="playerPanelTitle">玩家</h2>
           <div class="player-tools">
-            <button class="plain-button hidden" id="openBarrageButton" type="button">发弹幕</button>
+            <button class="plain-button hidden" id="openBarrageButton" type="button">发送弹幕</button>
             <span id="playerCount">0 人</span>
           </div>
         </div>
@@ -123,7 +125,6 @@
           <button type="button" data-barrage="这话有点可疑">这话有点可疑</button>
           <button type="button" data-barrage="我先记一票">我先记一票</button>
           <button type="button" data-barrage="这沉默很有故事">这沉默很有故事</button>
-          <button type="button" data-barrage="表情包炸弹" data-effect="bomb">炸弹</button>
         </div>
         <div class="chat-row">
           <input id="barrageInput" maxlength="40" placeholder="发一条弹幕" />
@@ -152,10 +153,10 @@
         <div class="rules-card">
           <p>1. 至少 3 人开局，房主不需要准备，其他玩家准备好后由房主开始。</p>
           <p>2. 每个人只看到自己的词，不显示身份，需要自己判断阵营。</p>
-          <p>3. 3-4 人 1 个卧底，5-6 人 2 个卧底，7 人及以上 3 个卧底。</p>
+          <p>3. 1-5 人 1 个卧底，超过 5 人 2 个卧底；每轮可投票数等于当前剩余卧底数。</p>
           <p>4. 每局发言 2 轮后投票，每人 60 秒，可提前发送或跳过；平票会加一轮发言再投。</p>
-          <p>5. 3-4 人局投错则卧底胜；5 人及以上第一次投错会淘汰被投玩家，加一轮发言再次投票，二次投错则卧底胜。</p>
-          <p>6. 游戏中点“发弹幕”或玩家头像可以发弹幕、快捷语和炸弹表情；淘汰后也能观战发弹幕。</p>
+          <p>5. 多票时不能重复投同一人，按得票前几名淘汰；若还剩卧底则加一轮发言，再次投错卧底胜。</p>
+          <p>6. 游戏中点“发送弹幕”或玩家头像可以发弹幕、快捷语和指定玩家发言；淘汰后也能观战发弹幕。</p>
           <p>7. 同一个房间每 5 局为一大轮，第 5 局结束公布总分排名；开启新大轮后分数重新累计。</p>
         </div>
       </div>
@@ -180,7 +181,9 @@
         </div>
       </div>
     </div>
+    <div class="speaker-notice hidden" id="speakerNotice">该你发言了</div>
     <div class="toast hidden" id="toast"></div>
+    <footer class="site-footer" id="homeFooter">小小游戏（921版），希望大家玩的开心～</footer>
     <script src="/socket.io/socket.io.js"></script>
     <script src="/app.js" type="module"></script>
   </body>

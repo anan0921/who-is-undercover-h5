@@ -6,6 +6,7 @@ const state = {
   room: null,
   clockOffset: 0,
   pendingVoteTargetId: "",
+  pendingVoteTargetIds: [],
   timerId: null,
   audioCtx: null,
   musicAudio: null,
@@ -16,6 +17,7 @@ const state = {
   reviewSeenFor: "",
   barrageTargetId: "",
   lastTickSecond: null,
+  lastSpeakerNoticeKey: "",
   seenBarrageIds: new Set(),
   optimisticBarrages: [],
   recorder: null,
@@ -26,11 +28,13 @@ const state = {
 const $ = (id) => document.getElementById(id);
 const refs = {
   home: $("homeView"),
+  footer: $("homeFooter"),
   nickname: $("nicknameInput"),
   roomCodeInput: $("roomCodeInput"),
   create: $("createRoomButton"),
   join: $("joinRoomButton"),
   rulesButton: $("rulesButton"),
+  roomRulesButton: $("roomRulesButton"),
   rulesModal: $("rulesModal"),
   closeRules: $("closeRulesButton"),
   roomHeader: $("roomHeader"),
@@ -70,10 +74,12 @@ const refs = {
   barrageInput: $("barrageInput"),
   sendBarrage: $("sendBarrageButton"),
   openBarrage: $("openBarrageButton"),
+  speakerNotice: $("speakerNotice"),
   votePanel: $("votePanel"),
   voteGrid: $("voteGrid"),
   confirmVote: $("confirmVoteButton"),
   playersPanel: $("playersPanel"),
+  playerPanelTitle: $("playerPanelTitle"),
   playerList: $("playerList"),
   playerCount: $("playerCount"),
   reviewModal: $("reviewModal"),
@@ -92,6 +98,7 @@ if (state.roomCode) refs.roomCodeInput.value = state.roomCode;
 refs.create.addEventListener("click", createRoom);
 refs.join.addEventListener("click", joinRoom);
 refs.rulesButton.addEventListener("click", () => refs.rulesModal.classList.remove("hidden"));
+refs.roomRulesButton.addEventListener("click", () => refs.rulesModal.classList.remove("hidden"));
 refs.closeRules.addEventListener("click", () => refs.rulesModal.classList.add("hidden"));
 refs.copyLink.addEventListener("click", copyLink);
 refs.share.addEventListener("click", shareRoom);
@@ -105,7 +112,7 @@ refs.chatInput.addEventListener("keydown", (event) => {
   if (event.key === "Enter") sendChat();
 });
 refs.sendBarrage.addEventListener("click", () => sendBarrage(refs.barrageInput.value));
-refs.openBarrage.addEventListener("click", () => openBarrageMenu(defaultBarrageTarget()));
+refs.openBarrage.addEventListener("click", () => openBarrageMenu(null));
 refs.barrageInput.addEventListener("keydown", (event) => {
   if (event.key === "Enter") sendBarrage(refs.barrageInput.value);
 });
@@ -118,6 +125,7 @@ refs.reviewChatInput.addEventListener("keydown", (event) => {
 document.querySelectorAll("[data-barrage]").forEach((button) => {
   button.addEventListener("click", () => sendBarrage(button.dataset.barrage, button.dataset.effect || "text"));
 });
+refs.speakerNotice.addEventListener("animationend", () => refs.speakerNotice.classList.add("hidden"));
 document.addEventListener("pointerdown", unlockAudio);
 document.addEventListener("touchstart", unlockAudio, { passive: true });
 document.addEventListener("click", unlockAudio);
@@ -199,6 +207,7 @@ function render() {
   const isMyTurn = room.phase === "speaking" && room.currentSpeakerId === state.playerId;
 
   refs.home.classList.add("hidden");
+  refs.footer.classList.add("hidden");
   refs.roomHeader.classList.remove("hidden");
   refs.status.classList.remove("hidden");
   refs.playersPanel.classList.remove("hidden");
@@ -215,6 +224,7 @@ function render() {
   renderSpeechComposer(room, isMyTurn, me);
   renderVotes(room, me);
   renderReview(room);
+  renderSpeakerNotice(room, isMyTurn);
   startTimer(room);
   startBackgroundMusic(room);
   updateSoundButton();
@@ -244,7 +254,7 @@ function renderStatus(room, me) {
 
   if (room.phase === "lobby") {
     refs.statusTitle.textContent = room.players.length < 3 ? "再邀请几位朋友" : "人数够了，房主可以开局";
-    refs.statusDetail.textContent = "3-4 人 1 个卧底，5-6 人 2 个卧底，7 人以上 3 个卧底。两轮发言后投票。";
+    refs.statusDetail.textContent = "1-5 人 1 个卧底，超过 5 人 2 个卧底。两轮发言后投票。";
   } else if (room.phase === "speaking") {
     const speaker = room.players.find((player) => player.id === room.currentSpeakerId);
     const stageRound = room.round - (room.speechStageStartRound || 1) + 1;
@@ -272,13 +282,14 @@ function renderStatus(room, me) {
 
 function renderPlayers(room) {
   refs.playerList.innerHTML = "";
+  refs.playerPanelTitle.textContent = room.phase === "lobby" ? "玩家" : "互动";
   refs.playersPanel.classList.toggle("compact", room.phase !== "lobby");
   refs.openBarrage.classList.toggle("hidden", room.phase === "lobby");
   refs.openBarrage.disabled = room.phase === "lobby";
   const visiblePlayers = room.phase === "lobby" ? room.players : compactBarragePlayers(room);
   for (const player of visiblePlayers) {
     const item = document.createElement("div");
-    item.className = "player";
+    item.className = `player ${player.id === room.currentSpeakerId ? "current" : ""} ${player.id === state.playerId ? "self" : ""}`;
     const label = player.compactRole ? `<span class="badge host">${player.compactRole}</span>` : "";
     const badges = [
       label,
@@ -311,7 +322,7 @@ function compactBarragePlayers(room) {
     || room.players.find((player) => !player.eliminated && player.id !== state.playerId)
     || me
     || room.players[0];
-  const left = speaker ? { ...speaker, compactRole: room.phase === "speaking" ? "正在发言" : "可互动" } : null;
+  const left = speaker ? { ...speaker, compactRole: "" } : null;
   const right = me ? { ...me, compactRole: "自己" } : null;
   if (left && right) return [left, right];
   return [left || right].filter(Boolean);
@@ -393,6 +404,7 @@ function renderMessages(room) {
 
 function renderChat(room) {
   refs.chatPanel.classList.toggle("hidden", !room || !state.roomCode || room.phase !== "lobby");
+  refs.roomRulesButton.classList.toggle("hidden", !room || !state.roomCode || room.phase !== "lobby");
   refs.chatTitle.textContent = "房间聊天";
   renderChatList(room.chatMessages || [], refs.chatList, refs.chatCount, "开局前先聊两句，催准备也可以。");
 }
@@ -433,12 +445,12 @@ function renderBarrages(room) {
 
 function spawnBarrage(barrage) {
   const item = document.createElement("div");
-  item.className = `barrage ${barrage.effect === "bomb" ? "bomb" : ""}`;
-  const target = barrage.targetName ? ` → ${barrage.targetName}` : "";
-  item.textContent = barrage.effect === "bomb" ? `炸弹 ${barrage.nickname}${target}：${barrage.text}` : `${barrage.nickname}${target}：${barrage.text}`;
-  item.style.top = `${12 + Math.random() * 68}%`;
+  item.className = "barrage";
+  const target = barrage.targetName ? ` -> ${barrage.targetName}` : "";
+  item.textContent = `${barrage.nickname}${target}：${barrage.text}`;
+  item.style.top = `${38 + Math.random() * 18}%`;
   refs.barrageStage.appendChild(item);
-  playEffect(barrage.effect === "bomb" ? "bomb" : "pop");
+  playEffect("pop");
   item.addEventListener("animationend", () => item.remove(), { once: true });
 }
 
@@ -458,28 +470,33 @@ function renderVotes(room, me) {
   refs.voteGrid.innerHTML = "";
   if (room.phase !== "voting") {
     state.pendingVoteTargetId = "";
+    state.pendingVoteTargetIds = [];
     return;
   }
 
-  const myVote = room.votes.find((vote) => vote.voterId === state.playerId)?.targetId;
-  if (myVote) state.pendingVoteTargetId = myVote;
-  refs.confirmVote.disabled = Boolean(me?.eliminated) || !state.pendingVoteTargetId;
-  refs.confirmVote.textContent = myVote ? "修改并提交" : "确定提交";
+  const quota = room.voteQuota || Math.max(1, room.remainingUndercoverCount || 1);
+  const myVotes = room.votes.filter((vote) => vote.voterId === state.playerId).map((vote) => vote.targetId);
+  if (myVotes.length) state.pendingVoteTargetIds = myVotes.slice(0, quota);
+  state.pendingVoteTargetIds = state.pendingVoteTargetIds.filter((id) => room.players.some((player) => player.id === id && !player.eliminated)).slice(0, quota);
+  state.pendingVoteTargetId = state.pendingVoteTargetIds[0] || "";
+  refs.confirmVote.disabled = Boolean(me?.eliminated) || state.pendingVoteTargetIds.length !== quota;
+  refs.confirmVote.textContent = myVotes.length ? `修改并提交（${state.pendingVoteTargetIds.length}/${quota}）` : `确定提交（${state.pendingVoteTargetIds.length}/${quota}）`;
   for (const player of room.players.filter((item) => !item.eliminated)) {
+    const selectedIndex = state.pendingVoteTargetIds.indexOf(player.id);
     const button = document.createElement("button");
     button.type = "button";
-    button.className = `vote-card ${state.pendingVoteTargetId === player.id ? "selected" : ""}`;
+    button.className = `vote-card ${selectedIndex >= 0 ? "selected" : ""}`;
     button.disabled = me?.eliminated;
     button.innerHTML = `
       <div class="avatar" style="background:${player.color}">${escapeHtml(player.nickname[0] || "玩")}</div>
       <div>
         <strong>${escapeHtml(player.nickname)}</strong>
-        <small>${player.id === state.playerId ? "你自己也可以被选择" : "候选玩家"}</small>
+        <small>${quota > 1 ? `请选择 ${quota} 人，不能重复投同一个人` : player.id === state.playerId ? "你自己也可以被选择" : "候选玩家"}</small>
       </div>
-      <span class="vote-status ${player.hasVoted ? "done" : ""}">${player.hasVoted ? "已投" : "未投"}</span>
+      <span class="vote-status ${selectedIndex >= 0 ? "done" : ""}">${selectedIndex >= 0 ? `第 ${selectedIndex + 1} 票` : "选择"}</span>
     `;
     button.addEventListener("click", () => {
-      state.pendingVoteTargetId = player.id;
+      toggleVoteTarget(player.id, quota);
       renderVotes(room, me);
     });
     refs.voteGrid.appendChild(button);
@@ -487,8 +504,21 @@ function renderVotes(room, me) {
 }
 
 function confirmVote() {
-  if (!state.pendingVoteTargetId) return toast("先选择一名玩家");
-  emit("vote:cast", { targetId: state.pendingVoteTargetId });
+  const quota = state.room?.voteQuota || 1;
+  if (state.pendingVoteTargetIds.length !== quota) return toast(`请选择 ${quota} 名玩家`);
+  emit("vote:cast", { targetIds: state.pendingVoteTargetIds });
+}
+
+function toggleVoteTarget(playerId, quota) {
+  const index = state.pendingVoteTargetIds.indexOf(playerId);
+  if (index >= 0) {
+    state.pendingVoteTargetIds.splice(index, 1);
+    return;
+  }
+  if (state.pendingVoteTargetIds.length >= quota) {
+    state.pendingVoteTargetIds.shift();
+  }
+  state.pendingVoteTargetIds.push(playerId);
 }
 
 function resultHtml(room) {
@@ -496,7 +526,8 @@ function resultHtml(room) {
   const undercovers = reveal.undercovers?.length
     ? reveal.undercovers
     : [{ id: reveal.undercoverId, name: reveal.undercoverName, color: reveal.undercoverColor }];
-  const votedOut = room.players.find((player) => player.id === reveal.votedOutId);
+  const votedOutIds = reveal.votedOutIds?.length ? reveal.votedOutIds : [reveal.votedOutId].filter(Boolean);
+  const votedOutNames = votedOutIds.map((id) => room.players.find((player) => player.id === id)?.nickname).filter(Boolean);
   const undercoverIds = new Set(undercovers.map((player) => player.id));
   const civilians = room.players.filter((player) => !undercoverIds.has(player.id));
   const scoreItems = room.players.map((player) => {
@@ -525,7 +556,7 @@ function resultHtml(room) {
           <em>${escapeHtml(reveal.civilianWord || "")}</em>
         </div>
       </div>
-      <div class="result-line"><span>被投出</span><strong>${escapeHtml(votedOut?.nickname || reveal.votedOutName || "无")}</strong></div>
+      <div class="result-line"><span>被投出</span><strong>${escapeHtml(votedOutNames.join("、") || reveal.votedOutName || "无")}</strong></div>
       <div class="score-row">${scoreItems}</div>
     </div>
   `;
@@ -626,13 +657,13 @@ function sendBarrage(text, effect = "text") {
     targetName: target?.nickname || "",
     color: me?.color || "#67d7ff",
     text: value,
-    effect,
+    effect: "text",
     createdAt: Date.now()
   };
   state.optimisticBarrages.push(optimistic);
   state.optimisticBarrages = state.optimisticBarrages.slice(-8);
   spawnBarrage(optimistic);
-  emit("barrage:send", { text: value, effect, targetId: state.barrageTargetId });
+  emit("barrage:send", { text: value, effect: "text", targetId: state.barrageTargetId });
   refs.barrageInput.value = "";
   closeBarrageMenu();
 }
@@ -646,25 +677,29 @@ function sendReviewChat() {
 
 function openBarrageMenu(player) {
   if (!state.room || state.room.phase === "lobby") return;
-  if (!player) return toast("现在还没有可互动的玩家");
-  state.barrageTargetId = player.id;
-  refs.barrageTitle.textContent = `对 ${player.nickname} 发弹幕`;
+  state.barrageTargetId = player?.id || "";
+  refs.barrageTitle.textContent = player ? `对 ${player.nickname} 发弹幕` : "发给全员";
   refs.barragePanel.classList.remove("hidden");
   refs.barrageInput.focus();
-}
-
-function defaultBarrageTarget() {
-  const room = state.room;
-  if (!room) return null;
-  return room.players.find((player) => player.id === room.currentSpeakerId)
-    || room.players.find((player) => player.id === state.playerId)
-    || room.players[0]
-    || null;
 }
 
 function closeBarrageMenu() {
   refs.barragePanel.classList.add("hidden");
   state.barrageTargetId = "";
+}
+
+function renderSpeakerNotice(room, isMyTurn) {
+  if (!isMyTurn) {
+    refs.speakerNotice.classList.add("hidden");
+    return;
+  }
+  const key = `${room.code}:${room.currentSpeakerStartedAt}:${room.currentSpeakerId}`;
+  if (state.lastSpeakerNoticeKey === key) return;
+  state.lastSpeakerNoticeKey = key;
+  refs.speakerNotice.classList.add("hidden");
+  void refs.speakerNotice.offsetWidth;
+  refs.speakerNotice.classList.remove("hidden");
+  navigator.vibrate?.(120);
 }
 
 function renderReview(room) {
@@ -866,6 +901,7 @@ function showHome() {
   state.room = null;
   if (state.roomCode) refs.roomCodeInput.value = state.roomCode;
   refs.home.classList.remove("hidden");
+  refs.footer.classList.remove("hidden");
   refs.roomHeader.classList.add("hidden");
   refs.secret.classList.add("hidden");
   refs.status.classList.add("hidden");
@@ -873,6 +909,7 @@ function showHome() {
   refs.controls.classList.add("hidden");
   refs.messagesPanel.classList.add("hidden");
   refs.chatPanel.classList.add("hidden");
+  refs.roomRulesButton.classList.add("hidden");
   refs.barragePanel.classList.add("hidden");
   refs.rulesModal.classList.add("hidden");
   refs.reviewModal.classList.add("hidden");
@@ -925,16 +962,13 @@ function formatScore(score) {
 function leaderboardHtml(room) {
   if (!room.isSeriesFinal) return "";
   const leaders = room.leaderboard || [];
-  const crownCount = Math.min(3, room.players.length);
   const rows = leaders.map((player) => {
-    const crown = player.rank <= crownCount ? `<span class="crown">王冠</span>` : "";
     const scoreClass = player.score > 0 ? "positive" : player.score < 0 ? "negative" : "";
     return `
       <div class="rank-row">
         <span class="rank-no">${player.rank}</span>
         <i style="background:${player.color}">${escapeHtml(player.nickname[0] || "玩")}</i>
         <strong>${escapeHtml(player.nickname)}</strong>
-        ${crown}
         <b class="${scoreClass}">${formatScore(player.score)}</b>
       </div>
     `;

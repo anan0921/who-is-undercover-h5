@@ -47,7 +47,7 @@ button:disabled {
   width: min(720px, 100%);
   min-height: 100vh;
   margin: 0 auto;
-  padding: max(14px, env(safe-area-inset-top)) 12px max(24px, env(safe-area-inset-bottom));
+  padding: max(14px, env(safe-area-inset-top)) 12px max(54px, env(safe-area-inset-bottom));
 }
 
 .topbar {
@@ -203,6 +203,10 @@ select:focus {
 
 .rules-toggle {
   width: 100%;
+}
+
+.room-rules {
+  margin-top: 8px;
 }
 
 .join-row {
@@ -597,6 +601,15 @@ textarea:focus {
   padding: 6px 7px;
 }
 
+.players.compact .player.current {
+  outline: 2px solid rgba(103, 215, 255, 0.82);
+  background: rgba(103, 215, 255, 0.12);
+}
+
+.players.compact .player.current .avatar {
+  animation: speaker-pop 0.9s ease-in-out infinite alternate;
+}
+
 .players.compact .avatar {
   width: 34px;
   height: 34px;
@@ -778,7 +791,7 @@ textarea:focus {
 .barrage-stage {
   position: fixed;
   inset: 88px 0 auto;
-  height: 42vh;
+  height: 52vh;
   z-index: 20;
   pointer-events: none;
   overflow: hidden;
@@ -786,7 +799,7 @@ textarea:focus {
 
 .barrage {
   position: absolute;
-  right: -120%;
+  left: -120%;
   white-space: nowrap;
   padding: 6px 10px;
   border-radius: 999px;
@@ -794,13 +807,7 @@ textarea:focus {
   color: #042030;
   font-size: 13px;
   font-weight: 900;
-  animation: fly-barrage 5.2s linear forwards;
-}
-
-.barrage.bomb {
-  background: linear-gradient(135deg, #fef08a, #fb7185);
-  box-shadow: 0 0 24px rgba(251, 113, 133, 0.65);
-  animation: fly-barrage 4.4s linear forwards;
+  animation: fly-barrage 9.6s linear forwards;
 }
 
 .quick-barrages {
@@ -821,7 +828,18 @@ textarea:focus {
     transform: translateX(0);
   }
   to {
-    transform: translateX(-240%);
+    transform: translateX(260vw);
+  }
+}
+
+@keyframes speaker-pop {
+  from {
+    transform: scale(1);
+    box-shadow: 0 0 0 rgba(103, 215, 255, 0);
+  }
+  to {
+    transform: scale(1.16);
+    box-shadow: 0 0 20px rgba(103, 215, 255, 0.75);
   }
 }
 
@@ -985,6 +1003,70 @@ textarea:focus {
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
 }
 
+.speaker-notice {
+  position: fixed;
+  inset: 0;
+  z-index: 45;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+  isolation: isolate;
+}
+
+.speaker-notice::before {
+  content: "";
+  width: 132px;
+  height: 132px;
+  position: absolute;
+  border-radius: 50%;
+  background: linear-gradient(135deg, rgba(103, 215, 255, 0.9), rgba(110, 231, 183, 0.88));
+  box-shadow: 0 20px 70px rgba(103, 215, 255, 0.45);
+  animation: notice-pulse 1s ease-in-out infinite alternate;
+  z-index: -1;
+}
+
+.speaker-notice {
+  color: #042030;
+  font-size: 20px;
+  font-weight: 900;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.25);
+}
+
+.speaker-notice:not(.hidden) {
+  animation: notice-fade 3s ease forwards;
+}
+
+.site-footer {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: max(12px, env(safe-area-inset-bottom));
+  z-index: 1;
+  text-align: center;
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 700;
+  pointer-events: none;
+}
+
+@keyframes notice-pulse {
+  from {
+    transform: scale(0.96);
+  }
+  to {
+    transform: scale(1.06);
+  }
+}
+
+@keyframes notice-fade {
+  0%, 66% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
 .modal {
   position: fixed;
   inset: 0;
@@ -1049,7 +1131,7 @@ textarea:focus {
 
 .rank-row {
   display: grid;
-  grid-template-columns: 24px 28px minmax(0, 1fr) auto auto;
+  grid-template-columns: 24px 28px minmax(0, 1fr) auto;
   align-items: center;
   gap: 7px;
   padding: 7px 8px;
@@ -1074,15 +1156,10 @@ textarea:focus {
   white-space: nowrap;
 }
 
-.rank-no,
-.crown {
+.rank-no {
   color: var(--muted);
   font-size: 12px;
   font-weight: 900;
-}
-
-.crown {
-  color: #fde68a;
 }
 
 .compact-title {
