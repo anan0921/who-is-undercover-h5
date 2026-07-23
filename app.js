@@ -118,6 +118,9 @@ refs.barrageInput.addEventListener("keydown", (event) => {
 });
 refs.closeBarrage.addEventListener("click", closeBarrageMenu);
 refs.closeReview.addEventListener("click", () => refs.reviewModal.classList.add("hidden"));
+refs.statusDetail.addEventListener("click", (event) => {
+  if (event.target?.id === "openReviewButton") refs.reviewModal.classList.remove("hidden");
+});
 refs.sendReviewChat.addEventListener("click", sendReviewChat);
 refs.reviewChatInput.addEventListener("keydown", (event) => {
   if (event.key === "Enter") sendReviewChat();
@@ -259,10 +262,15 @@ function renderStatus(room, me) {
     const speaker = room.players.find((player) => player.id === room.currentSpeakerId);
     const stageRound = room.round - (room.speechStageStartRound || 1) + 1;
     const totalRounds = room.speechRoundsInStage || room.speechRoundsBeforeVote;
-    refs.statusTitle.textContent = totalRounds === 1 && room.round > 3
-      ? `加时发言：${speaker?.nickname || "下一位"} 发言`
-      : `第 ${stageRound}/${totalRounds} 轮：${speaker?.nickname || "下一位"} 发言`;
-    refs.statusDetail.textContent = `第 ${room.seriesGameNumber}/${room.gamesPerSeries} 局 · 每人 60 秒，可提前发送或自己跳过。`;
+    if (room.isRoundPause) {
+      refs.statusTitle.textContent = `第 ${stageRound}/${totalRounds} 轮发言结束`;
+      refs.statusDetail.textContent = "本轮内容保留 5 秒，稍后进入下一轮或投票。";
+    } else {
+      refs.statusTitle.textContent = totalRounds === 1 && room.round > 3
+        ? `加时发言：${speaker?.nickname || "下一位"} 发言`
+        : `第 ${stageRound}/${totalRounds} 轮：${speaker?.nickname || "下一位"} 发言`;
+      refs.statusDetail.textContent = `第 ${room.seriesGameNumber}/${room.gamesPerSeries} 局 · 每人 60 秒，可提前发送或自己跳过。`;
+    }
   } else if (room.phase === "voting") {
     const submitted = room.players.filter((player) => !player.eliminated && player.hasVoted).length;
     const total = room.players.filter((player) => !player.eliminated).length;
@@ -274,9 +282,12 @@ function renderStatus(room, me) {
     `;
   } else if (room.phase === "ended") {
     refs.statusTitle.textContent = room.isSeriesFinal ? "五局结束，查看总分" : room.result?.winner === "civilians" ? "平民获胜" : "卧底获胜";
-    refs.statusDetail.textContent = room.isSeriesFinal
-      ? "本大轮已结束，赛后嘴硬区里可以看总分排名和本局答案。"
-      : "答案已公布，赛后嘴硬区里可以看卧底、词语和分数变化。";
+    refs.statusDetail.innerHTML = `
+      <span>${room.isSeriesFinal
+        ? "本大轮已结束，赛后嘴硬区里可以看总分排名和本局答案。"
+        : "答案已公布，赛后嘴硬区里可以看卧底、词语和分数变化。"}</span>
+      <button class="plain-button reopen-review" id="openReviewButton" type="button">打开复盘</button>
+    `;
   }
 }
 
@@ -361,7 +372,7 @@ function addControl(label, className, action, disabled = false) {
 }
 
 function renderMessages(room) {
-  refs.messagesPanel.classList.toggle("hidden", room.phase === "lobby" || room.messages.length === 0);
+  refs.messagesPanel.classList.toggle("hidden", room.phase === "lobby");
   refs.messageCount.textContent = `${room.messages.length} 条`;
   refs.messageList.innerHTML = "";
   if (room.messages.length === 0) {
@@ -455,7 +466,7 @@ function spawnBarrage(barrage) {
 }
 
 function renderSpeechComposer(room, isMyTurn, me) {
-  refs.speakPanel.classList.toggle("hidden", !isMyTurn || Boolean(me?.eliminated));
+  refs.speakPanel.classList.toggle("hidden", !isMyTurn || Boolean(me?.eliminated) || Boolean(room.isRoundPause));
   refs.sendSpeech.disabled = !isMyTurn;
   refs.skipSpeech.disabled = !isMyTurn;
   refs.record.disabled = !isMyTurn;
@@ -606,7 +617,7 @@ function startTimer(room) {
   refs.timer.classList.remove("danger");
   state.lastTickSecond = null;
 
-  if (room.phase !== "speaking" || !room.currentSpeakerStartedAt || room.allSpoken) return;
+  if (room.phase !== "speaking" || !room.currentSpeakerStartedAt || room.allSpoken || room.isRoundPause) return;
 
   const tick = () => {
     const serverNow = Date.now() - state.clockOffset;

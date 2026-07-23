@@ -72,10 +72,11 @@ io.on("connection", (socket) => {
     if (room) broadcastRoom(room.code);
   }));
 
-  socket.on("vote:cast", safe(socket, ({ roomCode, playerId, targetId }) => {
-    game.castVote({ roomCode, voterId: playerId, targetId });
+  socket.on("vote:cast", safe(socket, ({ roomCode, playerId, targetId, targetIds }, reply) => {
+    game.castVote({ roomCode, voterId: playerId, targetId, targetIds });
     const room = game.resolveVoteIfReady({ roomCode });
     broadcastRoom(room.code);
+    reply?.({ ok: true });
   }));
 
   socket.on("vote:remind", safe(socket, ({ roomCode, playerId }) => {
@@ -88,8 +89,8 @@ io.on("connection", (socket) => {
     broadcastRoom(room.code);
   }));
 
-  socket.on("barrage:send", safe(socket, ({ roomCode, playerId, text, effect }) => {
-    const room = game.sendBarrage({ roomCode, playerId, text, effect });
+  socket.on("barrage:send", safe(socket, ({ roomCode, playerId, text, effect, targetId }) => {
+    const room = game.sendBarrage({ roomCode, playerId, text, effect, targetId });
     broadcastRoom(room.code);
   }));
 
@@ -156,7 +157,19 @@ function scheduleSpeechTimer(room) {
   if (existing) clearTimeout(existing);
   speechTimers.delete(room.code);
 
-  if (room.phase !== "speaking" || !room.currentSpeakerStartedAt) return;
+  if (room.phase !== "speaking") return;
+
+  if (room.roundPauseUntil) {
+    const remainingPause = Math.max(0, room.roundPauseUntil - Date.now());
+    const timer = setTimeout(() => {
+      const updated = game.finishRoundPause({ roomCode: room.code });
+      if (updated) broadcastRoom(updated.code);
+    }, remainingPause + 100);
+    speechTimers.set(room.code, timer);
+    return;
+  }
+
+  if (!room.currentSpeakerStartedAt) return;
 
   const remaining = Math.max(0, SPEECH_SECONDS * 1000 - (Date.now() - room.currentSpeakerStartedAt));
   const timer = setTimeout(() => {

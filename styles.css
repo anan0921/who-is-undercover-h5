@@ -720,6 +720,7 @@ textarea:focus {
 
 .chat-list {
   display: grid;
+  align-content: start;
   gap: 7px;
   max-height: 230px;
   min-height: 128px;
@@ -730,15 +731,16 @@ textarea:focus {
 .chat-message {
   display: flex;
   width: 100%;
-  min-height: 54px;
-  gap: 8px;
+  max-width: 100%;
+  min-height: 0;
+  gap: 7px;
   align-items: center;
-  padding: 12px 14px;
+  padding: 7px 10px;
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.04);
   color: var(--muted);
   font-size: 13px;
-  line-height: 1.45;
+  line-height: 1.28;
 }
 
 .chat-message strong {
@@ -746,8 +748,10 @@ textarea:focus {
 }
 
 .chat-message.system {
-  display: grid;
-  place-items: center;
+  display: flex;
+  width: 100%;
+  max-width: 100%;
+  justify-content: center;
   text-align: center;
   color: #dff7ff;
   background: rgba(103, 215, 255, 0.12);
@@ -813,7 +817,7 @@ textarea:focus {
   color: #042030;
   font-size: 13px;
   font-weight: 900;
-  animation: fly-barrage 9.6s linear forwards;
+  animation: fly-barrage 13.5s linear forwards;
 }
 
 .quick-barrages {
@@ -1112,6 +1116,10 @@ textarea:focus {
 .review-chat {
   border-top: 1px solid var(--line);
   padding-top: 6px;
+}
+
+.reopen-review {
+  margin-top: 8px;
 }
 
 .result-reason {

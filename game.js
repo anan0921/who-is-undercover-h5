@@ -6,6 +6,7 @@ export const SPEECH_SECONDS = 60;
 export const SPEECH_ROUNDS_BEFORE_VOTE = 2;
 export const EXTRA_SPEECH_ROUNDS_AFTER_MISS = 1;
 export const GAMES_PER_SERIES = 5;
+export const ROUND_PAUSE_MS = 5000;
 export const COLORS = [
   "#f97316",
   "#06b6d4",
@@ -71,6 +72,7 @@ export function createStore({ now = () => Date.now(), random = Math.random } = {
       chatMessages: [],
       barrages: [],
       currentSpeakerStartedAt: null,
+      roundPauseUntil: null,
       gameNumber: 0,
       seriesNumber: 1
     };
@@ -141,6 +143,7 @@ export function createStore({ now = () => Date.now(), random = Math.random } = {
       now
     }));
     room.currentSpeakerStartedAt = now();
+    room.roundPauseUntil = null;
     room.gameNumber += 1;
 
     for (const player of room.players) {
@@ -270,6 +273,7 @@ export function createStore({ now = () => Date.now(), random = Math.random } = {
       room.speakerIndex = 0;
       room.votes = {};
       room.currentSpeakerStartedAt = now();
+      room.roundPauseUntil = null;
       return room;
     }
 
@@ -304,6 +308,7 @@ export function createStore({ now = () => Date.now(), random = Math.random } = {
       room.speakerIndex = 0;
       room.votes = {};
       room.currentSpeakerStartedAt = now();
+      room.roundPauseUntil = null;
       return room;
     }
 
@@ -333,6 +338,7 @@ export function createStore({ now = () => Date.now(), random = Math.random } = {
     room.speakerIndex = 0;
     room.votes = {};
     room.currentSpeakerStartedAt = now();
+    room.roundPauseUntil = null;
     return room;
   }
 
@@ -400,6 +406,25 @@ export function createStore({ now = () => Date.now(), random = Math.random } = {
     return room;
   }
 
+  function finishRoundPause({ roomCode }) {
+    const room = requireRoom(roomCode);
+    if (room.phase !== "speaking" || !room.roundPauseUntil) return room;
+
+    const stageEndRound = room.speechStageStartRound + room.speechRoundsInStage - 1;
+    room.roundPauseUntil = null;
+    if (room.round < stageEndRound) {
+      room.round += 1;
+      room.speakerIndex = 0;
+      room.currentSpeakerStartedAt = now();
+      return room;
+    }
+
+    room.phase = "voting";
+    room.votes = {};
+    room.currentSpeakerStartedAt = null;
+    return room;
+  }
+
   function restartGame({ roomCode, hostId }) {
     const room = requireRoom(roomCode);
     requireHost(room, hostId);
@@ -418,6 +443,7 @@ export function createStore({ now = () => Date.now(), random = Math.random } = {
     room.lastVoteSummary = null;
     room.messages = [];
     room.currentSpeakerStartedAt = null;
+    room.roundPauseUntil = null;
     room.missCount = 0;
     for (const player of room.players) {
       player.eliminated = false;
@@ -468,6 +494,7 @@ export function createStore({ now = () => Date.now(), random = Math.random } = {
     remindVoters,
     sendChat,
     sendBarrage,
+    finishRoundPause,
     markConnected,
     restartGame,
     leaveRoom,
@@ -504,6 +531,8 @@ export function publicRoomState(room, viewerId) {
     speakerIndex: room.speakerIndex,
     currentSpeakerId: currentSpeaker?.id || null,
     currentSpeakerStartedAt: room.currentSpeakerStartedAt,
+    roundPauseUntil: room.roundPauseUntil,
+    isRoundPause: room.phase === "speaking" && Boolean(room.roundPauseUntil),
     speechSeconds: SPEECH_SECONDS,
     speechRoundsBeforeVote: room.speechRoundsInStage,
     allSpoken: room.phase === "speaking" && speakingPlayers.length > 0 && room.speakerIndex >= speakingPlayers.length,
@@ -641,17 +670,8 @@ function advanceSpeaker(room, now) {
     return;
   }
 
-  const stageEndRound = room.speechStageStartRound + room.speechRoundsInStage - 1;
-  if (room.round < stageEndRound) {
-    room.round += 1;
-    room.speakerIndex = 0;
-    room.currentSpeakerStartedAt = now();
-    return;
-  }
-
-  room.phase = "voting";
-  room.votes = {};
   room.currentSpeakerStartedAt = null;
+  room.roundPauseUntil = now() + ROUND_PAUSE_MS;
 }
 
 function applyScores(room) {
