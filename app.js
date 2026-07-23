@@ -361,7 +361,7 @@ function addControl(label, className, action, disabled = false) {
 }
 
 function renderMessages(room) {
-  refs.messagesPanel.classList.toggle("hidden", room.phase === "lobby" && room.messages.length === 0);
+  refs.messagesPanel.classList.toggle("hidden", room.phase === "lobby" || room.messages.length === 0);
   refs.messageCount.textContent = `${room.messages.length} 条`;
   refs.messageList.innerHTML = "";
   if (room.messages.length === 0) {
@@ -471,6 +471,7 @@ function renderVotes(room, me) {
   if (room.phase !== "voting") {
     state.pendingVoteTargetId = "";
     state.pendingVoteTargetIds = [];
+    refs.confirmVote.disabled = false;
     return;
   }
 
@@ -506,7 +507,14 @@ function renderVotes(room, me) {
 function confirmVote() {
   const quota = state.room?.voteQuota || 1;
   if (state.pendingVoteTargetIds.length !== quota) return toast(`请选择 ${quota} 名玩家`);
-  emit("vote:cast", { targetIds: state.pendingVoteTargetIds });
+  refs.confirmVote.disabled = true;
+  emit("vote:cast", { targetId: state.pendingVoteTargetIds[0] || "", targetIds: state.pendingVoteTargetIds }, (response) => {
+    if (!response?.ok) {
+      refs.confirmVote.disabled = false;
+      return toast(response?.message || "投票提交失败");
+    }
+    toast("投票已提交");
+  });
 }
 
 function toggleVoteTarget(playerId, quota) {

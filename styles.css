@@ -635,14 +635,14 @@ textarea:focus {
 
 .public-chat {
   background: rgba(8, 36, 56, 0.96);
-  min-height: 330px;
+  min-height: 285px;
 }
 
 .message-list {
   display: grid;
-  gap: 8px;
-  max-height: min(54vh, 500px);
-  min-height: 250px;
+  gap: 6px;
+  max-height: min(46vh, 420px);
+  min-height: 205px;
   overflow: auto;
 }
 
@@ -657,8 +657,8 @@ textarea:focus {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  min-height: 42px;
-  padding: 0 10px;
+  min-height: 36px;
+  padding: 0 9px;
   cursor: pointer;
   color: var(--text);
   font-weight: 900;
@@ -672,15 +672,15 @@ textarea:focus {
 
 .round-messages {
   display: grid;
-  gap: 8px;
-  padding: 0 8px 8px;
+  gap: 6px;
+  padding: 0 7px 7px;
 }
 
 .message {
   display: grid;
-  grid-template-columns: 34px 1fr;
-  gap: 10px;
-  padding: 10px;
+  grid-template-columns: 30px 1fr;
+  gap: 8px;
+  padding: 8px;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.03);
@@ -688,14 +688,16 @@ textarea:focus {
 
 .message strong {
   display: block;
-  margin-bottom: 4px;
+  margin-bottom: 3px;
+  font-size: 13px;
 }
 
 .message p,
 .empty {
   margin: 0;
   color: var(--muted);
-  line-height: 1.5;
+  font-size: 13px;
+  line-height: 1.42;
 }
 
 .message.system {
@@ -704,6 +706,7 @@ textarea:focus {
   color: #dff7ff;
   background: rgba(103, 215, 255, 0.14);
   font-weight: 800;
+  font-size: 13px;
 }
 
 .message audio {
@@ -718,17 +721,19 @@ textarea:focus {
 .chat-list {
   display: grid;
   gap: 7px;
-  max-height: 180px;
+  max-height: 230px;
+  min-height: 128px;
   overflow: auto;
   margin-bottom: 10px;
 }
 
 .chat-message {
-  display: grid;
-  grid-template-columns: auto 1fr;
+  display: flex;
+  width: 100%;
+  min-height: 54px;
   gap: 8px;
-  align-items: start;
-  padding: 8px 10px;
+  align-items: center;
+  padding: 12px 14px;
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.04);
   color: var(--muted);
@@ -741,7 +746,8 @@ textarea:focus {
 }
 
 .chat-message.system {
-  display: block;
+  display: grid;
+  place-items: center;
   text-align: center;
   color: #dff7ff;
   background: rgba(103, 215, 255, 0.12);
@@ -844,9 +850,9 @@ textarea:focus {
 }
 
 .avatar.small {
-  width: 34px;
-  height: 34px;
-  font-size: 14px;
+  width: 30px;
+  height: 30px;
+  font-size: 13px;
 }
 
 .result-detail {

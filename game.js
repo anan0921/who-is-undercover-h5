@@ -431,7 +431,6 @@ export function createStore({ now = () => Date.now(), random = Math.random } = {
     if (!["lobby", "ended"].includes(room.phase)) throw new GameError("本局进行中，结束后才能退出");
     const player = requirePlayer(room, playerId);
     room.players = room.players.filter((item) => item.id !== player.id);
-    room.messages.push(makeSystemMessage({ text: `${player.nickname} 离开了房间`, now }));
     room.chatMessages.push(makeSystemMessage({ text: `${player.nickname} 离开了房间`, now }));
     if (room.hostId === player.id) transferHost(room);
     if (room.players.length === 0) rooms.delete(room.code);
