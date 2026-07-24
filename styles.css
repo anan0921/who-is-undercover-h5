@@ -311,6 +311,10 @@ select:focus {
   transform: translateX(-18px);
 }
 
+.status[data-phase="lobby"] h2 {
+  white-space: nowrap;
+}
+
 .status .eyebrow {
   margin-bottom: 0;
   color: var(--accent);
@@ -675,6 +679,16 @@ textarea:focus {
 
 .score.negative {
   color: var(--danger);
+}
+
+.kick-player {
+  min-width: 54px;
+  min-height: 30px;
+  border-radius: 999px;
+  background: rgba(239, 68, 68, 0.92);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 900;
 }
 
 .players.compact {

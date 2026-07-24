@@ -167,6 +167,14 @@ socket.on("room:state", (room) => {
 
 socket.on("room:error", ({ message }) => toast(message));
 
+socket.on("room:kicked", ({ message }) => {
+  toast(message || "你已被移出房间");
+  state.room = null;
+  state.roomCode = "";
+  history.replaceState(null, "", "/");
+  showHome();
+});
+
 async function createRoom() {
   if (!captureNickname()) return;
   const response = await request("room:create", {
@@ -297,6 +305,7 @@ function renderStatus(room, me) {
 
 function renderPlayers(room) {
   refs.playerList.innerHTML = "";
+  const isHost = room.hostId === state.playerId;
   refs.playerPanelTitle.textContent = room.phase === "lobby" ? "玩家" : "互动";
   refs.playersPanel.classList.toggle("compact", room.phase !== "lobby");
   refs.openBarrage.classList.toggle("hidden", room.phase === "lobby");
@@ -318,15 +327,19 @@ function renderPlayers(room) {
       room.reveal?.undercoverIds?.includes(player.id) ? `<span class="badge host">卧底</span>` : ""
     ].join("");
     const scoreClass = player.score > 0 ? "positive" : player.score < 0 ? "negative" : "";
+    const kickButton = isHost && room.phase === "lobby" && player.id !== state.playerId
+      ? `<button class="kick-player" type="button">踢出</button>`
+      : "";
     item.innerHTML = `
       <button class="avatar avatar-button" type="button" style="background:${player.color}" aria-label="给 ${escapeHtml(player.nickname)} 发弹幕">${escapeHtml(player.nickname[0] || "玩")}</button>
       <div>
         <div class="name">${escapeHtml(player.nickname)}</div>
         <div class="badges">${badges}</div>
       </div>
-      <div class="score ${scoreClass}">${formatScore(player.score)}</div>
+      ${kickButton || `<div class="score ${scoreClass}">${formatScore(player.score)}</div>`}
     `;
     item.querySelector(".avatar-button").addEventListener("click", () => openBarrageMenu(player));
+    item.querySelector(".kick-player")?.addEventListener("click", () => kickPlayer(player));
     refs.playerList.appendChild(item);
   }
 }
@@ -350,7 +363,8 @@ function renderControls(room, isHost, me) {
   if (!isHost) return;
 
   if (room.phase === "lobby") {
-    const readyToStart = room.players.length >= 3 && room.players.every((player) => player.isHost || player.ready);
+    const readyPlayers = room.players.filter((player) => player.connected);
+    const readyToStart = readyPlayers.length >= 3 && readyPlayers.every((player) => player.isHost || player.ready);
     addControl(readyToStart ? "开始游戏" : "等待玩家准备", "wide", () => emit("game:start"), !readyToStart);
     addControl("退出房间", "wide secondary", leaveRoom);
   } else if (room.phase === "speaking") {
@@ -756,6 +770,16 @@ function leaveRoom() {
   });
 }
 
+function kickPlayer(player) {
+  if (!player || player.id === state.playerId) return;
+  const ok = window.confirm(`确定把 ${player.nickname} 移出房间吗？`);
+  if (!ok) return;
+  emit("player:kick", { targetId: player.id }, (response) => {
+    if (!response?.ok) return toast(response?.message || "踢出失败");
+    toast(`已移出 ${player.nickname}`);
+  });
+}
+
 async function toggleRecording() {
   if (state.recorder?.state === "recording") {
     stopRecording(true);
@@ -855,13 +879,27 @@ function playTone({ frequency = 440, duration = 0.08, type = "sine", gain = 0.04
 
 function playEffect(type) {
   if (type === "tick") {
-    playTone({ frequency: 880, duration: 0.07, type: "square", gain: 0.035 });
+    duckBackgroundMusic(220);
+    playTone({ frequency: 980, duration: 0.11, type: "square", gain: 0.18 });
+    setTimeout(() => playTone({ frequency: 1320, duration: 0.06, type: "square", gain: 0.11 }), 46);
   } else if (type === "bomb") {
     playTone({ frequency: 120, duration: 0.14, type: "sawtooth", gain: 0.07 });
     setTimeout(() => playTone({ frequency: 80, duration: 0.18, type: "square", gain: 0.05 }), 70);
   } else {
     playTone({ frequency: 620, duration: 0.06, type: "triangle", gain: 0.025 });
   }
+}
+
+function duckBackgroundMusic(duration = 180) {
+  const audio = state.musicAudio;
+  if (!audio || audio.paused || !state.soundEnabled) return;
+  audio.volume = 0.22;
+  clearTimeout(duckBackgroundMusic.timer);
+  duckBackgroundMusic.timer = setTimeout(() => {
+    if (state.musicAudio && state.soundEnabled && !state.musicAudio.paused) {
+      state.musicAudio.volume = 1;
+    }
+  }, duration);
 }
 
 function startBackgroundMusic(room) {

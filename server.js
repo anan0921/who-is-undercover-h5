@@ -52,6 +52,20 @@ io.on("connection", (socket) => {
     broadcastRoom(room.code);
   }));
 
+  socket.on("player:kick", safe(socket, ({ roomCode, playerId, targetId }, reply) => {
+    const room = game.kickPlayer({ roomCode, hostId: playerId, targetId });
+    for (const [socketId, binding] of socketPlayers.entries()) {
+      if (binding.roomCode === room.code && binding.playerId === targetId) {
+        const target = io.sockets.sockets.get(socketId);
+        target?.emit("room:kicked", { message: "你已被房主移出房间" });
+        target?.leave(room.code);
+        socketPlayers.delete(socketId);
+      }
+    }
+    reply?.({ ok: true });
+    broadcastRoom(room.code);
+  }));
+
   socket.on("speech:next", safe(socket, ({ roomCode, playerId }) => {
     const room = game.nextSpeaker({ roomCode, hostId: playerId });
     broadcastRoom(room.code);

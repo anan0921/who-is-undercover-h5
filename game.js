@@ -162,6 +162,17 @@ export function createStore({ now = () => Date.now(), random = Math.random } = {
     return room;
   }
 
+  function kickPlayer({ roomCode, hostId, targetId }) {
+    const room = requireRoom(roomCode);
+    requireHost(room, hostId);
+    if (room.phase !== "lobby") throw new GameError("只有开局前可以踢人");
+    if (targetId === hostId) throw new GameError("房主不能踢自己");
+    const player = requirePlayer(room, targetId);
+    room.players = room.players.filter((item) => item.id !== player.id);
+    room.chatMessages.push(makeSystemMessage({ text: `${player.nickname} 被房主移出了房间`, now }));
+    return room;
+  }
+
   function nextSpeaker({ roomCode, hostId }) {
     const room = requireRoom(roomCode);
     requirePlayer(room, hostId);
@@ -484,6 +495,7 @@ export function createStore({ now = () => Date.now(), random = Math.random } = {
     joinRoom,
     startGame,
     setReady,
+    kickPlayer,
     nextSpeaker,
     submitSpeech,
     skipSpeech,
