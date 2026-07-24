@@ -5,7 +5,7 @@ export const MIN_PLAYERS = 3;
 export const SPEECH_SECONDS = 60;
 export const SPEECH_ROUNDS_BEFORE_VOTE = 2;
 export const EXTRA_SPEECH_ROUNDS_AFTER_MISS = 1;
-export const GAMES_PER_SERIES = 5;
+export const GAMES_PER_SERIES = 3;
 export const ROUND_PAUSE_MS = 5000;
 export const COLORS = [
   "#f97316",

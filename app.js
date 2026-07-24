@@ -293,7 +293,7 @@ function renderStatus(room, me) {
       <span class="progress-line">投票进度 ${submitted}/${total}${missing.length ? ` · 未提交：${escapeHtml(missing.join("、"))}` : " · 正在公布"}</span>
     `;
   } else if (room.phase === "ended") {
-    refs.statusTitle.textContent = room.isSeriesFinal ? "五局结束，查看总分" : room.result?.winner === "civilians" ? "平民获胜" : "卧底获胜";
+    refs.statusTitle.textContent = room.isSeriesFinal ? "三局结束，查看总分" : room.result?.winner === "civilians" ? "平民获胜" : "卧底获胜";
     refs.statusDetail.innerHTML = `
       <span>${room.isSeriesFinal
         ? "本大轮已结束，赛后嘴硬区里可以看总分排名和本局答案。"
@@ -1040,7 +1040,7 @@ function leaderboardHtml(room) {
   }).join("");
   return `
     <div class="leaderboard">
-      <div class="leaderboard-title">五局总分排名</div>
+      <div class="leaderboard-title">三局总分排名</div>
       ${rows}
     </div>
   `;
