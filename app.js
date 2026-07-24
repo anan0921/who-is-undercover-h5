@@ -280,8 +280,8 @@ function renderStatus(room, me) {
     const speaker = room.players.find((player) => player.id === room.currentSpeakerId);
     const stageRound = room.round - (room.speechStageStartRound || 1) + 1;
     const totalRounds = room.speechRoundsInStage || room.speechRoundsBeforeVote;
-    refs.phaseText.textContent = totalRounds === 1 && room.round > 3
-      ? `加时 ${stageRound}/${totalRounds} 轮`
+    refs.phaseText.textContent = totalRounds === 1
+      ? `加时 ${stageRound} 轮`
       : `第 ${stageRound}/${totalRounds} 轮`;
     if (room.isRoundPause) {
       refs.statusTitle.textContent = "本轮发言结束";
@@ -487,7 +487,7 @@ function spawnBarrage(barrage) {
   item.style.top = `${38 + Math.random() * 18}%`;
   refs.barrageStage.appendChild(item);
   const travelDistance = Math.ceil(window.innerWidth + item.offsetWidth + 64);
-  const duration = Math.max(18, Math.min(30, travelDistance / 34));
+  const duration = Math.max(15, Math.min(24, travelDistance / 40));
   item.style.setProperty("--barrage-translate", `-${travelDistance}px`);
   item.style.setProperty("--barrage-duration", `${duration.toFixed(2)}s`);
   playEffect("pop");

@@ -321,6 +321,7 @@ select:focus {
   font-size: 19px;
   line-height: 1.18;
   font-weight: 900;
+  white-space: nowrap;
 }
 
 .status-detail {
@@ -928,7 +929,7 @@ textarea:focus {
   color: #042030;
   font-size: 13px;
   font-weight: 900;
-  animation: fly-barrage var(--barrage-duration, 22s) linear forwards;
+  animation: fly-barrage var(--barrage-duration, 18s) linear forwards;
 }
 
 .quick-barrages {
