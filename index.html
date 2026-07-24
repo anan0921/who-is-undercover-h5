@@ -56,14 +56,12 @@
       </section>
 
       <section class="panel status hidden" id="statusCard">
-        <div>
-          <p class="eyebrow" id="phaseText">大厅</p>
         <div class="status-head">
-            <h2 id="statusTitle">等待玩家加入</h2>
-            <div class="timer hidden" id="timer">60</div>
-          </div>
+          <p class="eyebrow" id="phaseText">大厅</p>
+          <h2 id="statusTitle">等待玩家加入</h2>
+          <div class="timer hidden" id="timer">60</div>
         </div>
-        <p id="statusDetail">分享链接邀请朋友。</p>
+        <div class="status-detail" id="statusDetail">分享链接邀请朋友。</div>
       </section>
 
       <button class="rules-toggle room-rules hidden" id="roomRulesButton" type="button">不知道怎么玩？点这里</button>
@@ -134,9 +132,10 @@
 
       <section class="panel voting hidden" id="votePanel">
         <div class="section-title">
-          <h2>投票</h2>
+          <h2>轮到投票了</h2>
           <span id="voteHint">可在结算前改票</span>
         </div>
+        <div class="vote-callout" id="voteCallout">选择你怀疑的人，再点确定提交。</div>
         <div class="vote-grid" id="voteGrid"></div>
         <button class="primary confirm-vote" id="confirmVoteButton" type="button">确定提交</button>
       </section>

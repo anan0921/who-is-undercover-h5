@@ -76,6 +76,8 @@ const refs = {
   openBarrage: $("openBarrageButton"),
   speakerNotice: $("speakerNotice"),
   votePanel: $("votePanel"),
+  voteHint: $("voteHint"),
+  voteCallout: $("voteCallout"),
   voteGrid: $("voteGrid"),
   confirmVote: $("confirmVoteButton"),
   playersPanel: $("playersPanel"),
@@ -254,6 +256,7 @@ function renderStatus(room, me) {
     ended: "结算"
   };
   refs.phaseText.textContent = phaseMap[room.phase] || "房间";
+  refs.status.dataset.phase = room.phase;
 
   if (room.phase === "lobby") {
     refs.statusTitle.textContent = room.players.length < 3 ? "再邀请几位朋友" : "人数够了，房主可以开局";
@@ -262,19 +265,20 @@ function renderStatus(room, me) {
     const speaker = room.players.find((player) => player.id === room.currentSpeakerId);
     const stageRound = room.round - (room.speechStageStartRound || 1) + 1;
     const totalRounds = room.speechRoundsInStage || room.speechRoundsBeforeVote;
+    refs.phaseText.textContent = totalRounds === 1 && room.round > 3
+      ? `加时 ${stageRound}/${totalRounds} 轮`
+      : `第 ${stageRound}/${totalRounds} 轮`;
     if (room.isRoundPause) {
-      refs.statusTitle.textContent = `第 ${stageRound}/${totalRounds} 轮发言结束`;
+      refs.statusTitle.textContent = "本轮发言结束";
       refs.statusDetail.textContent = "本轮内容保留 5 秒，稍后进入下一轮或投票。";
     } else {
-      refs.statusTitle.textContent = totalRounds === 1 && room.round > 3
-        ? `加时发言：${speaker?.nickname || "下一位"} 发言`
-        : `第 ${stageRound}/${totalRounds} 轮：${speaker?.nickname || "下一位"} 发言`;
+      refs.statusTitle.textContent = `${speaker?.nickname || "下一位"} 发言`;
       refs.statusDetail.textContent = `第 ${room.seriesGameNumber}/${room.gamesPerSeries} 局 · 每人 60 秒，可提前发送或自己跳过。`;
     }
   } else if (room.phase === "voting") {
     const submitted = room.players.filter((player) => !player.eliminated && player.hasVoted).length;
     const total = room.players.filter((player) => !player.eliminated).length;
-    refs.statusTitle.textContent = me?.hasVoted ? "等待其他人提交" : "选择你怀疑的人";
+    refs.statusTitle.textContent = me?.hasVoted ? "投票已提交，等待公布" : "现在开始投票";
     const missing = room.players.filter((player) => !player.eliminated && !player.hasVoted).map((player) => player.nickname);
     refs.statusDetail.innerHTML = `
       <span class="vote-progress"><span style="width:${Math.round((submitted / total) * 100)}%"></span></span>
@@ -491,6 +495,10 @@ function renderVotes(room, me) {
   if (myVotes.length) state.pendingVoteTargetIds = myVotes.slice(0, quota);
   state.pendingVoteTargetIds = state.pendingVoteTargetIds.filter((id) => room.players.some((player) => player.id === id && !player.eliminated)).slice(0, quota);
   state.pendingVoteTargetId = state.pendingVoteTargetIds[0] || "";
+  refs.voteHint.textContent = myVotes.length ? "已提交，可在公布前改票" : "选完后记得点确定提交";
+  refs.voteCallout.textContent = me?.hasVoted
+    ? "你已经提交了，等其他人投完会自动公布。"
+    : `本轮需要选择 ${quota} 名玩家，点确定提交才算完成。`;
   refs.confirmVote.disabled = Boolean(me?.eliminated) || state.pendingVoteTargetIds.length !== quota;
   refs.confirmVote.textContent = myVotes.length ? `修改并提交（${state.pendingVoteTargetIds.length}/${quota}）` : `确定提交（${state.pendingVoteTargetIds.length}/${quota}）`;
   for (const player of room.players.filter((item) => !item.eliminated)) {
