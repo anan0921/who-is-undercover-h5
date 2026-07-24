@@ -1,6 +1,13 @@
 const socket = io();
+
+function makeClientId(prefix = "id") {
+  if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
+  const randomPart = Math.random().toString(36).slice(2, 10);
+  return `${prefix}-${Date.now().toString(36)}-${randomPart}`;
+}
+
 const state = {
-  playerId: localStorage.getItem("undercover.playerId") || crypto.randomUUID(),
+  playerId: localStorage.getItem("undercover.playerId") || makeClientId("player"),
   nickname: localStorage.getItem("undercover.nickname") || "",
   roomCode: currentRoomFromPath(),
   room: null,
@@ -479,6 +486,10 @@ function spawnBarrage(barrage) {
   item.textContent = `${barrage.nickname}${target}：${barrage.text}`;
   item.style.top = `${38 + Math.random() * 18}%`;
   refs.barrageStage.appendChild(item);
+  const travelDistance = Math.ceil(window.innerWidth + item.offsetWidth + 64);
+  const duration = Math.max(18, Math.min(30, travelDistance / 34));
+  item.style.setProperty("--barrage-translate", `-${travelDistance}px`);
+  item.style.setProperty("--barrage-duration", `${duration.toFixed(2)}s`);
   playEffect("pop");
   item.addEventListener("animationend", () => item.remove(), { once: true });
 }
@@ -691,7 +702,7 @@ function sendBarrage(text, effect = "text") {
   const me = room?.players.find((player) => player.id === state.playerId);
   const target = room?.players.find((player) => player.id === state.barrageTargetId);
   const optimistic = {
-    id: `local-${crypto.randomUUID()}`,
+    id: `local-${makeClientId("barrage")}`,
     playerId: state.playerId,
     nickname: me?.nickname || state.nickname || "我",
     targetId: target?.id || "",
@@ -1048,7 +1059,7 @@ function leaderboardHtml(room) {
 
 function wasOptimisticBarrage(barrage) {
   const now = Date.now();
-  state.optimisticBarrages = state.optimisticBarrages.filter((item) => now - item.createdAt < 3500);
+  state.optimisticBarrages = state.optimisticBarrages.filter((item) => now - item.createdAt < 12000);
   return state.optimisticBarrages.some((item) => (
     item.playerId === barrage.playerId
     && item.text === barrage.text
